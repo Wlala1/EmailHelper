@@ -1,6 +1,7 @@
 services:
   email_assistant:
-    images: email_assistant:latest
+    image: email_assistant:latest
+    container_name: email_assistant
     build: .
     ports:
       - "8000:8000"
