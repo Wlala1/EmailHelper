@@ -1,8 +1,16 @@
 services:
   email_assistant:
+    image: email_assistant:latest
+    container_name: email_assistant
     build: .
     ports:
       - "8000:8000"
     environment:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
+    networks:
+      - n8n-network
+
+networks:
+  n8n-network:
+    external: true
