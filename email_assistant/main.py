@@ -8,7 +8,7 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, File, Form, UploadFile
 from pydantic import BaseModel
 
 from schemas import EmailMessage, UserPreferences, ProcessRequest, ReplyConfirmRequest, TaskUpdateRequest
@@ -30,6 +30,13 @@ _email_store: dict[str, EmailMessage] = {}
 @app.get("/health")
 def health():
     return {"status": "ok", "agents": ["fetch", "classify", "summarize", "reply", "task", "monitor"]}
+
+
+@app.post("/test/webhook", response_model=dict)
+async def test_webhook(body: str = Form(...), attachment: UploadFile | None = File(None)):
+    """Echo back a text body and optional uploaded attachment name for n8n testing."""
+    attachment_name = attachment.filename if attachment else None
+    return {"body": body, "attachment_name": attachment_name}
 
 
 # ── Email fetching ────────────────────────────────────────────────────────────
