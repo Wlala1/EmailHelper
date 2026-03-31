@@ -1,0 +1,55 @@
+{
+    "AccessToken": {
+        "00000000-0000-0000-914f-49023b3d497d.9188040d-6c67-4c5b-b112-36a304b66dad-login.microsoftonline.com-accesstoken-c268827b-4830-4a2b-ab97-356395daf4a5-common-https://graph.microsoft.com/calendars.read https://graph.microsoft.com/calendars.readwrite https://graph.microsoft.com/contacts.read https://graph.microsoft.com/contacts.readwrite https://graph.microsoft.com/files.read.all https://graph.microsoft.com/files.readwrite.all https://graph.microsoft.com/mail.read https://graph.microsoft.com/mail.readwrite https://graph.microsoft.com/mail.send https://graph.microsoft.com/mailboxsettings.read https://graph.microsoft.com/mailboxsettings.readwrite https://graph.microsoft.com/tasks.read https://graph.microsoft.com/tasks.readwrite https://graph.microsoft.com/user.read openid profile": {
+            "credential_type": "AccessToken",
+            "secret": "EwCIBMl6BAAU9BatlgMxts2T1B5e3Mucgfs4jcAAAeWkoY1LhTDPkJe+y1nZWF2IIehue831IgFJkZJHn14NJSlCahUdPTzYldL8xoZ5CtUHpdagRTbD5z0brlfZg3TLzyL3/CGK2hyLsRN6o5DJ48HjM4lS5KFcUkNvlr6eNVE+7oqkgg9If9vPoyTqiu9bQZ3Mq54WY/tl8W80e8I6LBIXk7wiEf0FZYjwKoVcS6qjHlkB1k2VXu2BxvvvwVzEpGXVN27xeFmtQ4ym/4U24ODIHlO37XrayXwmqX1ZDcFx8+z937CaaNHQKgrtfOdZyHiSm0wgm/Z5IRiYwiKq0ztJPd48hjWTEes0u9YXGE4dEjNxDSPoPpFySFr2JCEQZgAAEPDImNonqEQlj3IrqF6R4SNQA3ImBTBL609OwtCsznoT9tRWSVEEAfu2rBdkfuT+j6cnXFIoss9HrxdtEECeG4nIPQiIAmdgTIQcz/lRDOZXyHq+nUjDgQxQphRVv67skuB/FdVfp8K14jJHFnoKl5h84prC3oNTHH5O1xUlkzYpwHlwwFVvNjbwP2yE0U3vwS2EJ0Yvu8VwxxlnzMyC+11T8v1SwLcGBBj/ivmtI0HbATl00ZF4bnwQo0jpU7m0+ooxQPrc/EEvRCl5PYP3BZ6znjJCj6UXLUiTq0ZVQebI/+xaox2TWYmkX5AOjVRa4aHsy3ML6AuhdrMVSxTjLDKETydTMfq9kUfSsUOeU2OYn76rCwmlfQHd6PebJzRz3eX3KpQUAdahWvFtnwP5s+aXNU/EmVhrvEgcJFByaps31dzw1J8DQGOF9fo6+2DbyZUkKsKOLMxC58rWIqSLq7m97s7vznNDV08WJTBMis3mTclW3Zyz4bAczhqzoOEalojOkfN0dCVeGYB/QraOyRlbkGMLfPawA4OiX5kIqLBU4flXSPArbG6kFVOb29/mJFL0bEv7fWZ/HIMlNyo8Outd1/gVeYc8OSMTXQxqaGmVmsYNBStwY+8IpYNRiy2Rb2lvKUhOZgPIv87cvBPGMe3wLiGat7lYvVr9zTSCTs5NMBPfqZ7Q7ER4w5keLnEO8/0G1Cj3jC11w8WD8ys3M9BUxU5NsosmmZJMv6Ga/ouRzywNl0eTDklkzGRdZJiTWxy5NVIGRyW/yyI7IIze6IWnM6fxqxcTdF93+eKp7ajIfDxyY7X7KbRLm1y+umLiJBEMhRCuqz8gtxUfB6V8DMAFOIu9WjKlf+rX6yeSMmrZZz6WEo/wSM4MkoGSnx3vYELgwgKc7i3ZZOor2Lcw/+18TvO1bQ1Z0nNPa1oAcroHnU6tWnb65ZC/TdIYeIkor5Wkbnf9Q7rx4HrEwoEmO96t8VxfzH4x0lFFT3nMWLeBUCR5S0As+me/KRSNJt8BPTU44yhaHlu/xwk8DqVxLDYlGmO9bykoFgS++kpqInexYyhLLhld4+b596Fp8jK5XS/n7E4fmxqbHFV8EGnSD4V3SDF7zfAxPXcOi0wTS/Wh337DUATpbdZ7CLH1ofILmfFkiQM=",
+            "home_account_id": "00000000-0000-0000-914f-49023b3d497d.9188040d-6c67-4c5b-b112-36a304b66dad",
+            "environment": "login.microsoftonline.com",
+            "client_id": "c268827b-4830-4a2b-ab97-356395daf4a5",
+            "target": "https://graph.microsoft.com/Calendars.Read https://graph.microsoft.com/Calendars.ReadWrite https://graph.microsoft.com/Contacts.Read https://graph.microsoft.com/Contacts.ReadWrite https://graph.microsoft.com/Files.Read.All https://graph.microsoft.com/Files.ReadWrite.All https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/MailboxSettings.Read https://graph.microsoft.com/MailboxSettings.ReadWrite https://graph.microsoft.com/Tasks.Read https://graph.microsoft.com/Tasks.ReadWrite https://graph.microsoft.com/User.Read openid profile",
+            "realm": "common",
+            "token_type": "Bearer",
+            "cached_at": "1774958743",
+            "expires_on": "1774962342",
+            "extended_expires_on": "1774962342"
+        }
+    },
+    "Account": {
+        "00000000-0000-0000-914f-49023b3d497d.9188040d-6c67-4c5b-b112-36a304b66dad-login.microsoftonline.com-common": {
+            "home_account_id": "00000000-0000-0000-914f-49023b3d497d.9188040d-6c67-4c5b-b112-36a304b66dad",
+            "environment": "login.microsoftonline.com",
+            "realm": "common",
+            "local_account_id": "00000000-0000-0000-914f-49023b3d497d",
+            "username": "lelehinna@outlook.com",
+            "authority_type": "MSSTS",
+            "account_source": "authorization_code"
+        }
+    },
+    "IdToken": {
+        "00000000-0000-0000-914f-49023b3d497d.9188040d-6c67-4c5b-b112-36a304b66dad-login.microsoftonline.com-idtoken-c268827b-4830-4a2b-ab97-356395daf4a5-common-": {
+            "credential_type": "IdToken",
+            "secret": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6IjVDc3JBMFl5ZWd6bW5uTThDSmtQbXNKYm5BMCJ9.eyJ2ZXIiOiIyLjAiLCJpc3MiOiJodHRwczovL2xvZ2luLm1pY3Jvc29mdG9ubGluZS5jb20vOTE4ODA0MGQtNmM2Ny00YzViLWIxMTItMzZhMzA0YjY2ZGFkL3YyLjAiLCJzdWIiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFDZlBqTVQ3S0FRMGR5NjFjSG9tUWIwIiwiYXVkIjoiYzI2ODgyN2ItNDgzMC00YTJiLWFiOTctMzU2Mzk1ZGFmNGE1IiwiZXhwIjoxNzc1MDQ1MTQzLCJpYXQiOjE3NzQ5NTg0NDMsIm5iZiI6MTc3NDk1ODQ0MywibmFtZSI6ImxlbGUgaGlubmEiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJsZWxlaGlubmFAb3V0bG9vay5jb20iLCJvaWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtOTE0Zi00OTAyM2IzZDQ5N2QiLCJ0aWQiOiI5MTg4MDQwZC02YzY3LTRjNWItYjExMi0zNmEzMDRiNjZkYWQiLCJhaW8iOiJEaXZpWEgybUNiNzRTY1R6QnM4cVFqekdSNU9nTUxVRXhiUGNOV09qRjdOYWtFOENtYm1QMlUhNEFOWWNQMnNTIUtqdTAhIWIqOUthT1JHS2c3Mnc0eDNkNzZrNzhHallBY29mR3pEQXh5NWl2ODVFSXMzZzg1T2hCYnJ4Mml1Y1Jyc3NScE1rcWVwU3Y3YUprVXhMUlRpNTA2aHNLa21Cd1hTQ0FXTlFOODNZbXpLRSFmaXVQSGlyZFlCVWdTSENkQSQkIn0.iPqXRPMGJ2U22djEoHKJzjsDjBK_0ZtnV86qJChUTGjRHa_PwyFrXl4P2xIGAmTUH6jBEdWFJSecm9WHZYCX-A_c9b-5XtosC-LzZHIU8CYOi032sRrudjaPojv9nl2yQ7TnjNexHNKgMtWkbnD09AxpyrKHTTwfXafK7-BU-4iKsvhxgCidgoF1X29agyVZbvXLkMIVRi6cGMNF3lT6KvZfHUfOkQ4dSzr2UFI2T7OuDjhQ0_uwC6-m_5gREGclnei7ZIfSBe-BCV6mGn63qKwYsGmk732jsVg3sy4mzc_X1u7JNbp6JxBn28cncSM5OUeLDUaZGcwlOL1vnQ-S6Q",
+            "home_account_id": "00000000-0000-0000-914f-49023b3d497d.9188040d-6c67-4c5b-b112-36a304b66dad",
+            "environment": "login.microsoftonline.com",
+            "realm": "common",
+            "client_id": "c268827b-4830-4a2b-ab97-356395daf4a5"
+        }
+    },
+    "RefreshToken": {
+        "00000000-0000-0000-914f-49023b3d497d.9188040d-6c67-4c5b-b112-36a304b66dad-login.microsoftonline.com-refreshtoken-c268827b-4830-4a2b-ab97-356395daf4a5--https://graph.microsoft.com/calendars.read https://graph.microsoft.com/calendars.readwrite https://graph.microsoft.com/contacts.read https://graph.microsoft.com/contacts.readwrite https://graph.microsoft.com/files.read.all https://graph.microsoft.com/files.readwrite.all https://graph.microsoft.com/mail.read https://graph.microsoft.com/mail.readwrite https://graph.microsoft.com/mail.send https://graph.microsoft.com/mailboxsettings.read https://graph.microsoft.com/mailboxsettings.readwrite https://graph.microsoft.com/tasks.read https://graph.microsoft.com/tasks.readwrite https://graph.microsoft.com/user.read openid profile": {
+            "credential_type": "RefreshToken",
+            "secret": "M.C547_SN1.0.U.-CmO*hilF!I3eSDktmfJFSOZ7EgTBYnjx*6zHsG2AOJikyf37ZwClVA7rPUJoPOt0fY0HhzBCDAyjEGOOI6x4UGjRPBrglXTJ4oy6upQdBTezOfvGS8uuLTSKNG82ru9ZC7qwPvS5QkvCqbGGaxsd2!VaMN6jMdFqSWL3j*5tgBCjOn6twmr1pgSv9NnX25bV3maHcub!cj7HpzPpc94jP*37779Jkuxp6PjtZTCin73t43jeE1nTcuV9TU4*TbvRoQRoAbcYCGv2aeXrUZ*fITTmte7nz5CsjHHtiSYZBHydLcfLreo0moMdGGSDC9U1XoL2K6IrE9RwHriXkdf8M8furzo!e7ImidI4XBRTsHsw7NTBCckyNXD2*iQlZgFgokc1xA5wfb1wvywJgsZkAXTcC47AEq82yaNqKu3guDGs7X9LWPIVLcyzED9kp6yts4FWz2mErEmuavrFR5xDdgU1ks3AdIUyvHf!8SiDcjhK*z!6WYXXZ*hODsmD0C9yMj*9yR8P8pARNkLm1GyyMVNOqi6Etyu1KhgBG8ZqZTSS5!nlLVXB3J5CQUv8TR2Ckg$$",
+            "home_account_id": "00000000-0000-0000-914f-49023b3d497d.9188040d-6c67-4c5b-b112-36a304b66dad",
+            "environment": "login.microsoftonline.com",
+            "client_id": "c268827b-4830-4a2b-ab97-356395daf4a5",
+            "target": "https://graph.microsoft.com/Calendars.Read https://graph.microsoft.com/Calendars.ReadWrite https://graph.microsoft.com/Contacts.Read https://graph.microsoft.com/Contacts.ReadWrite https://graph.microsoft.com/Files.Read.All https://graph.microsoft.com/Files.ReadWrite.All https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/MailboxSettings.Read https://graph.microsoft.com/MailboxSettings.ReadWrite https://graph.microsoft.com/Tasks.Read https://graph.microsoft.com/Tasks.ReadWrite https://graph.microsoft.com/User.Read openid profile",
+            "last_modification_time": "1774958743"
+        }
+    },
+    "AppMetadata": {
+        "appmetadata-login.microsoftonline.com-c268827b-4830-4a2b-ab97-356395daf4a5": {
+            "client_id": "c268827b-4830-4a2b-ab97-356395daf4a5",
+            "environment": "login.microsoftonline.com"
+        }
+    }
+}

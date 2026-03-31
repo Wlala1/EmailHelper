@@ -1,9 +1,14 @@
-from typing import List, Optional
+from typing import TypedDict, Literal, List, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
 
+class EmailClassification(TypedDict):
+    need_reply: bool
+    urgency: Literal["low", "medium", "high", "critical"]
+    topic: Literal["question", "bug", "billing", "feature", "complex"]
+    summary: Optional[str] = None
 
-class EmailMessage(BaseModel):
+class EmailMessage(TypedDict):
     id: str
     from_addr: str
     to: List[str] = []
@@ -14,12 +19,7 @@ class EmailMessage(BaseModel):
     labels: List[str] = []
 
     # Classification
-    classification: Optional[str] = None  # fundraiser | customer | internal | spam
-    confidence: Optional[float] = None
-
-    # Summarization
-    summary: Optional[str] = None
-    action_items: List[str] = []
+    classification: EmailClassification | None
 
     # Reply
     suggested_reply: Optional[str] = None
@@ -34,8 +34,7 @@ class EmailMessage(BaseModel):
     processed_at: Optional[str] = None
     error: Optional[str] = None
 
-
-class UserPreferences(BaseModel):
+class UserPreferences(TypedDict):
     user_id: str = "self"
     preferred_style: str = "warm"            # formal | warm | concise
     preferred_summary_length: str = "short"  # short | medium | long
@@ -45,16 +44,16 @@ class UserPreferences(BaseModel):
     last_updated: Optional[str] = None
 
 
-class ProcessRequest(BaseModel):
+class ProcessRequest(TypedDict):
     email_id: str
     force_reprocess: bool = False
 
 
-class ReplyConfirmRequest(BaseModel):
+class ReplyConfirmRequest(TypedDict):
     email_id: str
     reply_text: str
 
 
-class TaskUpdateRequest(BaseModel):
+class TaskUpdateRequest(TypedDict):
     email_id: str
     status: str  # Pending | Completed
