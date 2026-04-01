@@ -24,7 +24,7 @@ def run_pipeline():
         logger.info(f"正在同步邮件 (最大限制: {EMAIL_FETCH_LIMIT})...")
         
         # 抓取并存储（存储逻辑已内化在 fetch_emails 中）
-        emails = fetch_emails(unread_only=True)
+        emails = fetch_emails(unread_only=False, limit=EMAIL_FETCH_LIMIT)
 
         if not emails:
             logger.info("同步完成：没有发现新邮件。")

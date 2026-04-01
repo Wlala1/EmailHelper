@@ -9,7 +9,7 @@ from psycopg2.extras import RealDictCursor
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
 from langchain_openai import ChatOpenAI
-from langchain.messages import HumanMessage, BaseMessage
+from langchain.messages import HumanMessage
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from schemas import EmailMessage, EmailClassification
@@ -48,13 +48,13 @@ def read_email(state: EmailMessage) -> dict:
         return {
             "id": email_data['id'],
             "from_addr": email_data['from_addr'],
-            "to": email_data['to'] or [],
+            "to": email_data['to_addrs'] or [],
             "subject": email_data['subject'] or "",
             "body": email_data['body'] or "",
             "received_at": str(email_data['received_at']),
             "attachments": email_data['attachments'] or [],
             "labels": email_data['labels'] or [],
-            "classification": None
+            "classification": {}
         }
     finally:
         if conn: conn.close()

@@ -5,7 +5,7 @@ from datetime import datetime
 class EmailClassification(TypedDict):
     need_reply: bool
     urgency: Literal["low", "medium", "high", "critical"]
-    topic: Literal["question", "bug", "billing", "feature", "complex"]
+    topic: str
     summary: Optional[str] = None
 
 class EmailMessage(TypedDict):
