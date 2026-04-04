@@ -25,14 +25,6 @@ class AgentRunStatus(str, Enum):
     skipped = "skipped"
 
 
-class EmailCategory(str, Enum):
-    academic_conferences = "AcademicConferences"
-    canvas_course_updates = "CanvasCourseUpdates"
-    campus_faculty_career_opportunities = "CampusFacultyCareerOpportunities"
-    social_events = "SocialEvents"
-    teams_meetings = "TeamsMeetings"
-
-
 class ScheduleAction(str, Enum):
     create_tentative_event = "create_tentative_event"
     suggest_only = "suggest_only"
@@ -104,7 +96,8 @@ class AttachmentPayload(BaseModel):
 
 
 class ClassifierOutput(BaseModel):
-    category: EmailCategory
+    category: str
+    category_description: Optional[str] = None
     urgency_score: float
     summary: str
     sender_role: str

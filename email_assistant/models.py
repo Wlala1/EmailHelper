@@ -116,6 +116,18 @@ class ClassifierResult(Base):
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class CategoryDefinition(Base):
+    __tablename__ = "category_definitions"
+
+    category_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    category_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    category_description: Mapped[str] = mapped_column(Text, nullable=False)
+    created_from_email_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class AttachmentResult(Base):
     __tablename__ = "attachment_results"
 

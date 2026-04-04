@@ -13,61 +13,80 @@ from agents.input_handler import ParsedAttachment, parse_attachment
 from config import MAX_CLASSIFIER_CONTEXT_CHARS, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
 from models import AttachmentResult, ClassifierResult
 from repositories import (
+    create_category_definition,
     create_terminal_run,
+    get_category_definitions,
     get_email,
     get_email_attachments,
     set_non_current_attachment,
     set_non_current_classifier,
 )
-from schemas import AgentRunStatus, ClassifierOutput, EmailCategory
+from schemas import AgentRunStatus
 
 _client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL) if OPENAI_API_KEY else None
 
+CLASSIFIER_PROMPT = """You are an email classifier with evolving categories.
 
-CLASSIFIER_PROMPT = """You are OUMA classifier.
-Classify the email into exactly one category:
-- AcademicConferences
-- CanvasCourseUpdates
-- CampusFacultyCareerOpportunities
-- SocialEvents
-- TeamsMeetings
+You receive:
+1) Existing categories (name + description)
+2) Current email content
 
-Also output:
-- urgency_score: number in [0,1]
-- summary: concise summary in Chinese
-- sender_role: inferred role (Professor/Teammate/Admin/Company/etc.)
-- named_entities: list of important entities
-- time_expressions: list of time expressions or dates
+Decide:
+- whether this email belongs to one of the existing categories
+- if not, create a new category with a short clear name and description
 
-Return JSON only:
+Output JSON only:
 {
-  "category": "...",
+  "selected_category_name": "existing category name if matched",
+  "is_new_category": false,
+  "new_category_name": "",
+  "new_category_description": "",
   "urgency_score": 0.0,
-  "summary": "...",
-  "sender_role": "...",
+  "summary": "concise Chinese summary",
+  "sender_role": "Professor/Teammate/Admin/Company/etc.",
   "named_entities": [],
   "time_expressions": []
 }
 """
+
+STOPWORDS = {
+    "this",
+    "that",
+    "with",
+    "from",
+    "your",
+    "have",
+    "will",
+    "please",
+    "subject",
+    "email",
+    "about",
+    "thanks",
+    "dear",
+    "team",
+    "regards",
+    "hello",
+    "there",
+}
 
 
 def _dedup_keep_order(items: list[str]) -> list[str]:
     return list(dict.fromkeys(items))
 
 
-def _heuristic_category(text: str) -> EmailCategory:
-    t = text.lower()
-    if "call for papers" in t or "cfp" in t or "submission" in t:
-        return EmailCategory.academic_conferences
-    if "canvas" in t or "assignment" in t or "quiz" in t or "grade" in t:
-        return EmailCategory.canvas_course_updates
-    if "career" in t or "intern" in t or "job fair" in t or "recruit" in t:
-        return EmailCategory.campus_faculty_career_opportunities
-    if "teams meeting" in t or "microsoft teams" in t or "join meeting" in t:
-        return EmailCategory.teams_meetings
-    if "event" in t or "social" in t or "club" in t:
-        return EmailCategory.social_events
-    return EmailCategory.canvas_course_updates
+def _normalize_category_name(name: str) -> str:
+    name = re.sub(r"[^A-Za-z0-9\s\-_&/]", " ", (name or "").strip())
+    name = re.sub(r"\s+", " ", name).strip()
+    if not name:
+        return "General Updates"
+    if len(name) > 64:
+        name = name[:64].strip()
+    return name.title()
+
+
+def _tokenize(text: str) -> set[str]:
+    words = re.findall(r"[a-zA-Z][a-zA-Z0-9_]{2,}", text.lower())
+    return {w for w in words if w not in STOPWORDS}
 
 
 def _heuristic_sender_role(sender_email: str, sender_name: Optional[str]) -> str:
@@ -106,27 +125,106 @@ def _extract_time_expressions(text: str) -> list[str]:
     return _dedup_keep_order(found)[:20]
 
 
-def _heuristic_classify(combined_text: str, sender_email: str, sender_name: Optional[str]) -> ClassifierOutput:
-    category = _heuristic_category(combined_text)
+def _heuristic_new_category_name(subject: str, text: str) -> str:
+    t = f"{subject}\n{text}".lower()
+    if "call for papers" in t or "cfp" in t or "submission" in t:
+        return "Academic Conferences"
+    if "canvas" in t or "assignment" in t or "quiz" in t or "grade" in t:
+        return "Course Updates"
+    if "career" in t or "intern" in t or "job fair" in t or "recruit" in t:
+        return "Career Opportunities"
+    if "teams meeting" in t or "microsoft teams" in t or "join meeting" in t:
+        return "Teams Meetings"
+    if "event" in t or "social" in t or "club" in t:
+        return "Social Events"
+    if "invoice" in t or "payment" in t or "receipt" in t:
+        return "Billing"
+
+    subject_words = re.findall(r"[A-Za-z0-9]+", subject or "")
+    if subject_words:
+        return _normalize_category_name(" ".join(subject_words[:4]))
+    return "General Updates"
+
+
+def _heuristic_new_category_description(name: str, text: str) -> str:
+    snippets = text.strip().replace("\n", " ")
+    snippets = re.sub(r"\s+", " ", snippets)
+    if snippets:
+        return f"Emails related to {name}, typically covering: {snippets[:120]}."
+    return f"Emails related to {name}."
+
+
+def _best_existing_category(
+    existing_categories: list[dict[str, str]],
+    combined_text: str,
+) -> tuple[Optional[str], float]:
+    content_tokens = _tokenize(combined_text)
+    if not content_tokens:
+        return None, 0.0
+
+    best_name: Optional[str] = None
+    best_score = 0.0
+    for cat in existing_categories:
+        cat_tokens = _tokenize(f"{cat['category_name']} {cat['category_description']}")
+        if not cat_tokens:
+            continue
+        overlap = len(content_tokens & cat_tokens)
+        score = overlap / max(1, len(cat_tokens))
+        if score > best_score:
+            best_score = score
+            best_name = cat["category_name"]
+    return best_name, best_score
+
+
+def _heuristic_classify(
+    *,
+    combined_text: str,
+    sender_email: str,
+    sender_name: Optional[str],
+    subject: str,
+    existing_categories: list[dict[str, str]],
+) -> dict[str, Any]:
     urgency = 0.5
     if re.search(r"\b(urgent|asap|deadline|today|tomorrow)\b", combined_text, re.IGNORECASE):
         urgency = 0.85
     time_expressions = _extract_time_expressions(combined_text)
     if time_expressions:
         urgency = max(urgency, 0.7)
+
     summary = combined_text.strip().replace("\n", " ")
     summary = summary[:220] + ("..." if len(summary) > 220 else "")
-    return ClassifierOutput(
-        category=category,
-        urgency_score=round(min(1.0, urgency), 4),
-        summary=summary or "邮件内容较短，建议查看原文。",
-        sender_role=_heuristic_sender_role(sender_email, sender_name),
-        named_entities=_extract_entities(combined_text),
-        time_expressions=time_expressions,
-    )
+
+    best_name, best_score = _best_existing_category(existing_categories, combined_text)
+    if best_name and best_score >= 0.1:
+        selected_category_name = best_name
+        selected_description = next(
+            (x["category_description"] for x in existing_categories if x["category_name"] == best_name),
+            f"Emails related to {best_name}.",
+        )
+        is_new_category = False
+    else:
+        selected_category_name = _heuristic_new_category_name(subject, combined_text)
+        selected_description = _heuristic_new_category_description(selected_category_name, combined_text)
+        is_new_category = True
+
+    return {
+        "category_name": _normalize_category_name(selected_category_name),
+        "category_description": selected_description.strip(),
+        "is_new_category": is_new_category,
+        "urgency_score": round(min(1.0, urgency), 4),
+        "summary": summary or "邮件内容较短，建议查看原文。",
+        "sender_role": _heuristic_sender_role(sender_email, sender_name),
+        "named_entities": _extract_entities(combined_text),
+        "time_expressions": time_expressions,
+    }
 
 
-def _llm_classify(combined_text: str) -> Optional[ClassifierOutput]:
+def _llm_classify(
+    *,
+    combined_text: str,
+    existing_categories: list[dict[str, str]],
+    subject: str,
+) -> Optional[dict[str, Any]]:
     if _client is None:
         return None
     try:
@@ -134,25 +232,59 @@ def _llm_classify(combined_text: str) -> Optional[ClassifierOutput]:
             model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": CLASSIFIER_PROMPT},
-                {"role": "user", "content": combined_text[:MAX_CLASSIFIER_CONTEXT_CHARS]},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "existing_categories": existing_categories,
+                            "subject": subject,
+                            "content": combined_text[:MAX_CLASSIFIER_CONTEXT_CHARS],
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
             ],
             temperature=0.1,
             response_format={"type": "json_object"},
         )
         data = json.loads(response.choices[0].message.content)
-        category_raw = data.get("category", EmailCategory.canvas_course_updates.value)
-        valid = {c.value for c in EmailCategory}
-        if category_raw not in valid:
-            category_raw = EmailCategory.canvas_course_updates.value
+        existing_names = {x["category_name"] for x in existing_categories}
+        is_new_category = bool(data.get("is_new_category", False))
 
-        return ClassifierOutput(
-            category=EmailCategory(category_raw),
-            urgency_score=float(data.get("urgency_score", 0.5)),
-            summary=str(data.get("summary", "")).strip() or "未生成摘要",
-            sender_role=str(data.get("sender_role", "Unknown")).strip() or "Unknown",
-            named_entities=[str(x) for x in data.get("named_entities", [])][:30],
-            time_expressions=[str(x) for x in data.get("time_expressions", [])][:20],
-        )
+        selected_category_name = _normalize_category_name(str(data.get("selected_category_name", "")).strip())
+        new_category_name = _normalize_category_name(str(data.get("new_category_name", "")).strip())
+        new_category_description = str(data.get("new_category_description", "")).strip()
+
+        if is_new_category:
+            category_name = new_category_name or selected_category_name
+            category_description = new_category_description or f"Emails related to {category_name}."
+        else:
+            if selected_category_name not in existing_names and existing_names:
+                category_name = next(iter(existing_names))
+            elif not existing_names:
+                is_new_category = True
+                category_name = new_category_name or selected_category_name or _heuristic_new_category_name(subject, combined_text)
+            else:
+                category_name = selected_category_name
+
+            if is_new_category:
+                category_description = new_category_description or f"Emails related to {category_name}."
+            else:
+                category_description = next(
+                    (x["category_description"] for x in existing_categories if x["category_name"] == category_name),
+                    f"Emails related to {category_name}.",
+                )
+
+        return {
+            "category_name": _normalize_category_name(category_name),
+            "category_description": category_description.strip(),
+            "is_new_category": is_new_category,
+            "urgency_score": float(data.get("urgency_score", 0.5)),
+            "summary": str(data.get("summary", "")).strip() or "未生成摘要",
+            "sender_role": str(data.get("sender_role", "Unknown")).strip() or "Unknown",
+            "named_entities": [str(x) for x in data.get("named_entities", [])][:30],
+            "time_expressions": [str(x) for x in data.get("time_expressions", [])][:20],
+        }
     except Exception:
         return None
 
@@ -281,16 +413,54 @@ def run_classifier(
         )
         attachment_status = AgentRunStatus.skipped.value
 
+    existing_categories = [
+        {
+            "category_name": item.category_name,
+            "category_description": item.category_description,
+        }
+        for item in get_category_definitions(session, user_id)
+    ]
+
     combined_text = _build_combined_context(email, parsed_results)
-    model_output = _llm_classify(combined_text)
+    model_output = _llm_classify(
+        combined_text=combined_text,
+        existing_categories=existing_categories,
+        subject=email.subject or "",
+    )
     if model_output is None:
-        model_output = _heuristic_classify(combined_text, email.sender_email, email.sender_name)
+        model_output = _heuristic_classify(
+            combined_text=combined_text,
+            sender_email=email.sender_email,
+            sender_name=email.sender_name,
+            subject=email.subject or "",
+            existing_categories=existing_categories,
+        )
+
+    category_name = _normalize_category_name(model_output["category_name"])
+    category_description = (model_output.get("category_description") or "").strip()
+    existing_lookup = {x["category_name"]: x["category_description"] for x in existing_categories}
+
+    is_new_category = bool(model_output.get("is_new_category", False))
+    if category_name in existing_lookup:
+        category_description = existing_lookup[category_name]
+        is_new_category = False
+    else:
+        if not category_description:
+            category_description = _heuristic_new_category_description(category_name, combined_text)
+        create_category_definition(
+            session,
+            user_id=user_id,
+            category_name=category_name,
+            category_description=category_description,
+            created_from_email_id=email_id,
+        )
+        is_new_category = True
 
     merged_entities = _dedup_keep_order(
-        model_output.named_entities + [e for p in parsed_results for e in p.named_entities]
+        [str(x) for x in model_output.get("named_entities", [])] + [e for p in parsed_results for e in p.named_entities]
     )[:30]
     merged_times = _dedup_keep_order(
-        model_output.time_expressions + [t for p in parsed_results for t in p.time_expressions]
+        [str(x) for x in model_output.get("time_expressions", [])] + [t for p in parsed_results for t in p.time_expressions]
     )[:20]
 
     set_non_current_classifier(session, email_id)
@@ -300,24 +470,34 @@ def run_classifier(
             trace_id=trace_id,
             email_id=email_id,
             user_id=user_id,
-            category=model_output.category.value,
-            urgency_score=model_output.urgency_score,
-            summary=model_output.summary,
-            sender_role=model_output.sender_role,
+            category=category_name,
+            urgency_score=float(model_output.get("urgency_score", 0.5)),
+            summary=str(model_output.get("summary", "")).strip() or "未生成摘要",
+            sender_role=str(model_output.get("sender_role", "Unknown")).strip() or "Unknown",
             named_entities=merged_entities,
             time_expressions=merged_times,
             is_current=True,
         )
     )
 
+    category_catalog = get_category_definitions(session, user_id)
     return {
-        "category": model_output.category.value,
-        "urgency_score": model_output.urgency_score,
-        "summary": model_output.summary,
-        "sender_role": model_output.sender_role,
+        "category": category_name,
+        "category_description": category_description,
+        "is_new_category": is_new_category,
+        "urgency_score": float(model_output.get("urgency_score", 0.5)),
+        "summary": str(model_output.get("summary", "")).strip() or "未生成摘要",
+        "sender_role": str(model_output.get("sender_role", "Unknown")).strip() or "Unknown",
         "named_entities": merged_entities,
         "time_expressions": merged_times,
         "attachment_status": attachment_status,
         "attachment_results": [_attachment_result_to_dict(item) for item in parsed_results],
+        "category_catalog": [
+            {
+                "category_name": item.category_name,
+                "category_description": item.category_description,
+            }
+            for item in category_catalog
+        ],
         "produced_at_utc": datetime.now(timezone.utc).isoformat(),
     }

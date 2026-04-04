@@ -44,7 +44,8 @@ def _heuristic_response(
 ) -> dict[str, Any]:
     relationship_weight = (relationship_snapshot or {}).get("relationship_weight", 0.5)
     action = (top_schedule_candidate or {}).get("action")
-    is_teams = category == "TeamsMeetings"
+    category_l = (category or "").lower()
+    is_teams = ("teams" in category_l and "meeting" in category_l) or "meeting" in category_l
     has_schedule_action = action == "create_tentative_event"
     reply_required = bool(is_teams or has_schedule_action or relationship_weight >= 0.7)
 

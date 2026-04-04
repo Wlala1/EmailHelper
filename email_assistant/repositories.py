@@ -14,6 +14,7 @@ from models import (
     AgentRun,
     Attachment,
     AttachmentResult,
+    CategoryDefinition,
     ClassifierResult,
     Email,
     EmailRecipient,
@@ -363,3 +364,45 @@ def path_exists(path: Optional[str]) -> bool:
     if not path:
         return False
     return Path(path).exists()
+
+
+def get_category_definitions(session: Session, user_id: str) -> list[CategoryDefinition]:
+    return session.scalars(
+        select(CategoryDefinition)
+        .where(CategoryDefinition.user_id == user_id)
+        .order_by(CategoryDefinition.created_at_utc.asc())
+    ).all()
+
+
+def get_category_by_name(session: Session, user_id: str, category_name: str) -> Optional[CategoryDefinition]:
+    return session.scalars(
+        select(CategoryDefinition)
+        .where(
+            CategoryDefinition.user_id == user_id,
+            CategoryDefinition.category_name == category_name,
+        )
+        .limit(1)
+    ).first()
+
+
+def create_category_definition(
+    session: Session,
+    *,
+    user_id: str,
+    category_name: str,
+    category_description: str,
+    created_from_email_id: Optional[str] = None,
+) -> CategoryDefinition:
+    existing = get_category_by_name(session, user_id, category_name)
+    if existing:
+        return existing
+    category = CategoryDefinition(
+        category_id=str(uuid4()),
+        user_id=user_id,
+        category_name=category_name,
+        category_description=category_description,
+        created_from_email_id=created_from_email_id,
+    )
+    session.add(category)
+    session.flush()
+    return category

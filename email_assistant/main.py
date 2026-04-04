@@ -21,6 +21,7 @@ from repositories import (
     create_agent_run,
     finalize_agent_run_failed,
     finalize_agent_run_success,
+    get_category_by_name,
     get_current_classifier,
     get_current_top_schedule_candidate,
     get_latest_branch_statuses,
@@ -247,6 +248,10 @@ def trace_email_status(trace_id: str, email_id: str, db: Session = Depends(get_d
         .order_by(ReplySuggestion.created_at_utc.desc())
         .limit(1)
     ).first()
+    category_description = None
+    if classifier:
+        category = get_category_by_name(db, classifier.user_id, classifier.category)
+        category_description = category.category_description if category else None
 
     return {
         "trace_id": trace_id,
@@ -254,6 +259,7 @@ def trace_email_status(trace_id: str, email_id: str, db: Session = Depends(get_d
         "branch_statuses": statuses,
         "current_classifier": {
             "category": classifier.category,
+            "category_description": category_description,
             "urgency_score": classifier.urgency_score,
             "summary": classifier.summary,
             "sender_role": classifier.sender_role,
