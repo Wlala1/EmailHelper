@@ -1,0 +1,61 @@
+{
+  "name": "OUMA Bootstrap Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 10 }]
+        }
+      },
+      "name": "Bootstrap Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/users_pending_bootstrap",
+        "options": {}
+      },
+      "name": "Get Users Pending Bootstrap",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "user_ids",
+        "options": {}
+      },
+      "name": "Split by User",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/bootstrap_user/{{ $json.user_id }}",
+        "method": "POST",
+        "options": {}
+      },
+      "name": "Bootstrap User",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "Bootstrap Trigger": {
+      "main": [[{ "node": "Get Users Pending Bootstrap", "type": "main", "index": 0 }]]
+    },
+    "Get Users Pending Bootstrap": {
+      "main": [[{ "node": "Split by User", "type": "main", "index": 0 }]]
+    },
+    "Split by User": {
+      "main": [[{ "node": "Bootstrap User", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "tags": ["ouma", "bootstrap"]
+}
