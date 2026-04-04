@@ -263,8 +263,34 @@ class UserWritingProfile(Base):
     sample_count: Mapped[int] = mapped_column(Integer, default=0)
     profile_payload: Mapped[dict] = mapped_column(JSON, default=dict)
     last_profiled_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Behavioral preference vector (Phase E): updated from user feedback events.
+    # Schema: {
+    #   "tone_accept_rates": {"professional": 0.8, "casual": 0.5, "colloquial": 0.3},
+    #   "schedule_accept_rate": 0.6,
+    #   "feedback_count": 12,
+    # }
+    preference_vector: Mapped[dict] = mapped_column(JSON, default=dict)
+    preference_vector_updated_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class UserFeedbackEvent(Base):
+    """Records explicit or implicit user feedback on agent suggestions."""
+    __tablename__ = "user_feedback_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    email_id: Mapped[str] = mapped_column(String(64), index=True)
+    # What the user gave feedback on.
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    # Values: "schedule_candidate" | "reply_suggestion" | "tone_template" | "draft_write"
+    target_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Values: "accepted" | "rejected" | "edited" | "dismissed" | "deferred"
+    feedback_signal: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    # Optional metadata, e.g. {"tone_key": "professional", "conflict_score_at_time": 0.3}
+    feedback_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class SyncRun(Base):

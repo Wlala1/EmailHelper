@@ -18,6 +18,7 @@ from repositories import (
     get_users_pending_bootstrap,
     release_lease,
 )
+from services.calendar_feedback_service import sync_calendar_event_feedback
 from services.mailbox_sync_service import MailboxSyncService
 
 
@@ -46,6 +47,7 @@ class MailboxWorker:
         while not self._stop.is_set():
             self.run_bootstrap_cycle_once()
             self.run_poll_cycle_once()
+            self.run_calendar_feedback_cycle_once()
             self._stop.wait(BACKGROUND_LOOP_INTERVAL_SECONDS)
 
     def run_bootstrap_cycle_once(self) -> None:
@@ -81,6 +83,20 @@ class MailboxWorker:
             with SessionLocal() as session:
                 release_lease(session, lock_name="mailbox-poller", owner_id=self.owner_id)
                 session.commit()
+
+    def run_calendar_feedback_cycle_once(self) -> None:
+        """Check Outlook event response statuses and record feedback signals."""
+        with SessionLocal() as session:
+            from repositories import get_users_due_for_poll
+            user_ids = [
+                state.user_id
+                for state in get_users_due_for_poll(session, poll_interval_seconds=POLL_INTERVAL_SECONDS)
+            ]
+        for user_id in user_ids:
+            self._with_user_lease(
+                f"calendar-feedback:{user_id}",
+                lambda uid=user_id: sync_calendar_event_feedback(SessionLocal, user_id=uid),
+            )
 
     def _with_user_lease(self, lock_name: str, callback) -> None:
         session: Session = SessionLocal()

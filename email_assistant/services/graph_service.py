@@ -169,6 +169,80 @@ class MicrosoftGraphService:
             "webLink": updated.get("webLink") or draft.get("webLink"),
         }
 
+    def get_calendar_event(self, access_token: str, event_id: str) -> dict[str, Any]:
+        """Fetch a single calendar event by ID.
+
+        Returns the event dict including ``responseStatus`` and ``showAs``.
+        Raises GraphServiceError if the event is not found.
+        """
+        return self._graph_get(
+            f"/me/events/{event_id}",
+            access_token=access_token,
+            query={"$select": "id,subject,showAs,responseStatus,start,end,isCancelled"},
+        )
+
+    def get_calendar_events(
+        self,
+        access_token: str,
+        *,
+        start_time_utc: datetime,
+        end_time_utc: datetime,
+        top: int = 50,
+    ) -> list[dict[str, Any]]:
+        """List calendar events in a time window.
+
+        Returns events including ``responseStatus`` so callers can detect
+        accepted/declined/tentative status for candidate matching.
+        """
+        start_iso = start_time_utc.astimezone(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+        end_iso = end_time_utc.astimezone(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+        payload = self._graph_get(
+            "/me/calendarView",
+            access_token=access_token,
+            query={
+                "startDateTime": start_iso,
+                "endDateTime": end_iso,
+                "$select": "id,subject,showAs,responseStatus,start,end,isCancelled",
+                "$top": str(top),
+            },
+        )
+        return payload.get("value", [])
+
+    def get_free_busy(
+        self,
+        access_token: str,
+        *,
+        start_time_utc: datetime,
+        end_time_utc: datetime,
+        schedules: Optional[list[str]] = None,
+        availability_view_interval: int = 30,
+    ) -> list[dict[str, Any]]:
+        """Query the user's free/busy information via MS Graph getSchedule.
+
+        Calls POST /me/calendar/getSchedule.
+        Returns the list of schedule items from the Graph API response.
+        Requires Calendars.Read scope (included in AZURE_SCOPE).
+        """
+        if schedules is None:
+            schedules = ["me"]
+        payload = self._graph_post(
+            "/me/calendar/getSchedule",
+            access_token=access_token,
+            json_payload={
+                "schedules": schedules,
+                "startTime": {
+                    "dateTime": start_time_utc.astimezone(timezone.utc).replace(tzinfo=None).isoformat(),
+                    "timeZone": "UTC",
+                },
+                "endTime": {
+                    "dateTime": end_time_utc.astimezone(timezone.utc).replace(tzinfo=None).isoformat(),
+                    "timeZone": "UTC",
+                },
+                "availabilityViewInterval": availability_view_interval,
+            },
+        )
+        return payload.get("value", [])
+
     def create_tentative_event(self, access_token: str, candidate: dict[str, Any]) -> dict[str, Any]:
         payload = self._graph_post(
             "/me/events",

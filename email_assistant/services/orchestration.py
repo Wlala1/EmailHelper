@@ -294,6 +294,18 @@ def learn_from_outbound_email(session_factory: sessionmaker, *, email_id: str, u
 
 
 def _preferred_tone_key(profile: Optional[dict[str, Any]]) -> str:
+    """Return the preferred tone key for this user.
+
+    When USE_PREFERENCE_VECTOR=true, picks the tone with the highest acceptance
+    rate from the preference_vector.  Falls back to the style-profile mapping.
+    """
+    from config import USE_PREFERENCE_VECTOR
+    if USE_PREFERENCE_VECTOR:
+        pref_vector = (profile or {}).get("preference_vector") or {}
+        tone_accept_rates: dict[str, float] = pref_vector.get("tone_accept_rates", {})
+        if tone_accept_rates:
+            return max(tone_accept_rates, key=lambda k: tone_accept_rates[k])
+    # Fallback: map style profile to tone key.
     tone_profile = (profile or {}).get("tone_profile")
     if tone_profile == "formal":
         return "professional"
@@ -365,7 +377,10 @@ def maybe_create_reply_draft(session_factory: sessionmaker, *, user_id: str, ema
             session.commit()
             return {"draft_status": record.draft_status, "policy_name": reason}
 
-        tone_key = _preferred_tone_key({"tone_profile": profile.tone_profile if profile else None})
+        tone_key = _preferred_tone_key({
+            "tone_profile": profile.tone_profile if profile else None,
+            "preference_vector": dict(getattr(profile, "preference_vector", None) or {}) if profile else {},
+        })
         body_html = reply.tone_templates.get(tone_key) or next(iter(reply.tone_templates.values()), "")
         draft = create_reply_draft(
             session,

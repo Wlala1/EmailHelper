@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -12,16 +13,28 @@ from models import ReplySuggestion
 from repositories import (
     get_current_classifier,
     get_current_top_schedule_candidate,
+    get_email,
     get_relationship_snapshot,
     get_user_writing_profile,
     set_non_current_reply,
 )
+from services.neo4j_service import get_person_context
+
+logger = logging.getLogger(__name__)
 
 _client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL) if OPENAI_API_KEY else None
 
 SYSTEM_PROMPT = """You are OUMA Response Agent.
 Given classifier result, attachment status, relationship snapshot, top schedule candidate,
-and the user's historical writing profile, decide whether a reply is required and produce three tone templates.
+the user's historical writing profile, and the sender's identity tier (1=authority/professor,
+2=professional/external, 3=peer/teammate), decide whether a reply is required and produce
+three tone templates.
+
+Identity tier guidance:
+  Tier 1 (professor/advisor/director): always reply_required=true, use professional tone.
+  Tier 2 (recruiter/manager/client): reply if relationship is warm or meeting involved.
+  Tier 3 (teammate/peer/student): reply if action required or relationship strong.
+
 Return JSON only:
 {
   "reply_required": true/false,
@@ -33,6 +46,30 @@ Return JSON only:
   }
 }
 """
+
+# Sender identity tier mapping: keyword → tier integer
+IDENTITY_TIER_MAP: dict[str, int] = {
+    # Tier 1 — high authority / mentorship
+    "professor": 1, "advisor": 1, "supervisor": 1, "pi ": 1, "director": 1,
+    "dean": 1, "principal": 1, "head of": 1, "chief": 1,
+    # Tier 2 — professional / external
+    "recruiter": 2, "hr": 2, "manager": 2, "partner": 2, "client": 2,
+    "employer": 2, "hiring": 2, "talent": 2, "vendor": 2, "consultant": 2,
+    # Tier 3 — peer / internal (default)
+    "teammate": 3, "colleague": 3, "intern": 3, "student": 3, "recipient": 3,
+    "peer": 3, "classmate": 3, "ta": 3, "assistant": 3,
+}
+
+
+def _sender_tier(person_role: Optional[str]) -> int:
+    """Map a person_role string to a tier integer (1=authority, 2=professional, 3=peer)."""
+    if not person_role:
+        return 3
+    role_lower = person_role.lower()
+    for keyword, tier in IDENTITY_TIER_MAP.items():
+        if keyword in role_lower:
+            return tier
+    return 3
 
 
 def _profile_to_dict(profile: Any) -> dict[str, Any]:
@@ -47,6 +84,7 @@ def _profile_to_dict(profile: Any) -> dict[str, Any]:
         "signature_blocks": list(getattr(profile, "signature_blocks", []) or []),
         "cta_patterns": list(getattr(profile, "cta_patterns", []) or []),
         "sample_count": int(getattr(profile, "sample_count", 0) or 0),
+        "preference_vector": dict(getattr(profile, "preference_vector", None) or {}),
     }
 
 
@@ -58,13 +96,25 @@ def _heuristic_response(
     relationship_snapshot: Optional[dict[str, Any]],
     top_schedule_candidate: Optional[dict[str, Any]],
     writing_profile: Optional[dict[str, Any]],
+    identity_tier: int = 3,
+    shared_events: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     relationship_weight = (relationship_snapshot or {}).get("relationship_weight", 0.5)
     action = (top_schedule_candidate or {}).get("action")
     category_l = (category or "").lower()
     is_teams = ("teams" in category_l and "meeting" in category_l) or "meeting" in category_l
     has_schedule_action = action == "create_tentative_event"
-    reply_required = bool(is_teams or has_schedule_action or relationship_weight >= 0.7)
+    # If the sender has been involved in previous shared events with the user,
+    # that signals an ongoing relationship → lean toward replying.
+    has_shared_events = bool(shared_events)
+
+    # Identity-tier-aware reply decision.
+    if identity_tier == 1:
+        # Always reply to authority contacts (professors, advisors, directors).
+        reply_required = True
+    else:
+        reply_required = bool(is_teams or has_schedule_action or relationship_weight >= 0.7 or has_shared_events)
+
     profile = writing_profile or {}
     preferred_language = (profile.get("preferred_language") or "zh").lower()
     tone_profile = (profile.get("tone_profile") or "formal").lower()
@@ -72,7 +122,30 @@ def _heuristic_response(
     closing_patterns = profile.get("closing_patterns") or []
     signature_blocks = profile.get("signature_blocks") or []
 
-    if reply_required:
+    # Apply preference vector: pick the tone key with the highest acceptance rate
+    # within the set of tones allowed for this identity tier.
+    pref_vector = profile.get("preference_vector") or {}
+    tone_accept_rates: dict[str, float] = pref_vector.get("tone_accept_rates", {})
+    tier_allowed_tones: dict[int, list[str]] = {
+        1: ["professional"],
+        2: ["professional", "casual"],
+        3: ["professional", "casual", "colloquial"],
+    }
+    allowed = tier_allowed_tones.get(identity_tier, ["professional", "casual", "colloquial"])
+    if tone_accept_rates:
+        from config import USE_PREFERENCE_VECTOR
+        if USE_PREFERENCE_VECTOR:
+            preferred_tone_key = max(allowed, key=lambda t: tone_accept_rates.get(t, 0.5))
+        else:
+            preferred_tone_key = allowed[0]
+    else:
+        preferred_tone_key = allowed[0]
+
+    if identity_tier == 1:
+        reason = "发件人为高权重联系人（教授/导师/主管），建议正式回复。"
+    elif reply_required and has_shared_events:
+        reason = "发件人有历史共同事件记录，建议保持回复。"
+    elif reply_required:
         reason = "发件人关系强且邮件包含时间/行动信息，建议回复确认。"
     else:
         reason = "当前邮件信息偏通知类，暂不强制回复。"
@@ -136,14 +209,18 @@ def _heuristic_response(
         casual += f"\n\n{signature}"
         colloquial += f"\n\n{signature}"
 
+    tone_templates = {
+        "professional": professional,
+        "casual": casual,
+        "colloquial": colloquial,
+    }
+
     return {
         "reply_required": reply_required,
         "decision_reason": reason,
-        "tone_templates": {
-            "professional": professional,
-            "casual": casual,
-            "colloquial": colloquial,
-        },
+        "tone_templates": tone_templates,
+        "preferred_tone_key": preferred_tone_key,
+        "identity_tier": identity_tier,
     }
 
 
@@ -155,6 +232,9 @@ def _llm_response(
     relationship_snapshot: Optional[dict[str, Any]],
     top_schedule_candidate: Optional[dict[str, Any]],
     writing_profile: Optional[dict[str, Any]],
+    identity_tier: int = 3,
+    shared_org_members: Optional[list[str]] = None,
+    shared_events: Optional[list[str]] = None,
 ) -> Optional[dict[str, Any]]:
     if _client is None:
         return None
@@ -165,6 +245,9 @@ def _llm_response(
             "relationship_snapshot": relationship_snapshot or {},
             "top_schedule_candidate": top_schedule_candidate or {},
             "writing_profile": writing_profile or {},
+            "identity_tier": identity_tier,
+            "shared_org_members": shared_org_members or [],
+            "shared_events_count": len(shared_events or []),
         }
         response = _client.chat.completions.create(
             model=OPENAI_MODEL,
@@ -200,7 +283,35 @@ def run_response(
     if classifier is None:
         raise ValueError("classifier current result missing")
 
-    relationship_snapshot = get_relationship_snapshot(session, email_id)
+    email = get_email(session, email_id)
+    sender_email = email.sender_email if email else None
+    relationship_snapshot: Optional[dict[str, Any]] = None
+    shared_org_members: list[str] = []
+    shared_events: list[str] = []
+    if sender_email:
+        try:
+            neo4j_context = get_person_context(user_id=user_id, person_email=sender_email)
+            if neo4j_context:
+                relationship_snapshot = {
+                    k: v for k, v in neo4j_context.items() if v is not None
+                }
+                shared_org_members = neo4j_context.get("shared_org_members") or []
+                shared_events = neo4j_context.get("shared_events") or []
+        except Exception as exc:
+            logger.debug("Neo4j person context unavailable: %s", exc)
+
+    # Fill any missing values from the SQL fallback snapshot.
+    sql_snapshot = get_relationship_snapshot(session, email_id)
+    if sql_snapshot:
+        relationship_snapshot = {
+            **sql_snapshot,
+            **(relationship_snapshot or {}),
+        }
+
+    # Determine sender identity tier.
+    person_role = (relationship_snapshot or {}).get("sender_role") or (relationship_snapshot or {}).get("person_role")
+    identity_tier = _sender_tier(person_role)
+
     top_candidate = get_current_top_schedule_candidate(session, email_id)
     writing_profile = _profile_to_dict(get_user_writing_profile(session, user_id))
     top_schedule_candidate = None
@@ -218,6 +329,9 @@ def run_response(
         relationship_snapshot=relationship_snapshot,
         top_schedule_candidate=top_schedule_candidate,
         writing_profile=writing_profile,
+        identity_tier=identity_tier,
+        shared_org_members=shared_org_members,
+        shared_events=shared_events,
     )
     if output is None:
         output = _heuristic_response(
@@ -227,7 +341,13 @@ def run_response(
             relationship_snapshot=relationship_snapshot,
             top_schedule_candidate=top_schedule_candidate,
             writing_profile=writing_profile,
+            identity_tier=identity_tier,
+            shared_events=shared_events,
         )
+
+    # Always force reply_required=True for Tier 1 senders, even if LLM disagrees.
+    if identity_tier == 1:
+        output["reply_required"] = True
 
     set_non_current_reply(session, email_id)
     session.add(
@@ -247,6 +367,10 @@ def run_response(
         "reply_required": output["reply_required"],
         "decision_reason": output["decision_reason"],
         "tone_templates": output["tone_templates"],
+        "identity_tier": identity_tier,
+        "preferred_tone_key": output.get("preferred_tone_key", "professional"),
+        "shared_org_members": shared_org_members,
+        "shared_events": shared_events,
         "relationship_snapshot": relationship_snapshot,
         "top_schedule_candidate": top_schedule_candidate,
         "writing_profile": writing_profile,

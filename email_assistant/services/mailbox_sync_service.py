@@ -33,7 +33,7 @@ class MailboxSyncService:
     def __init__(self, session_factory: sessionmaker) -> None:
         self.session_factory = session_factory
 
-    def bootstrap_user(self, user_id: str) -> None:
+    def bootstrap_user(self, user_id: str) -> dict[str, object]:
         session: Session = self.session_factory()
         try:
             user = get_user(session, user_id)
@@ -41,7 +41,7 @@ class MailboxSyncService:
             state = get_or_create_user_mailbox_state(session, user_id)
             if user is None or account is None or state.bootstrap_status != "running":
                 session.commit()
-                return
+                return {"user_id": user_id, "status": "skipped", "reason": "bootstrap_not_running"}
             primary_email = user.primary_email
             display_name = user.display_name
             timezone_name = user.timezone
@@ -52,7 +52,7 @@ class MailboxSyncService:
 
         since_utc = datetime.now(timezone.utc) - timedelta(days=BOOTSTRAP_LOOKBACK_DAYS)
         try:
-            self._bootstrap_folder(
+            inbox_result = self._bootstrap_folder(
                 user_id=user_id,
                 primary_email=primary_email,
                 display_name=display_name,
@@ -63,7 +63,7 @@ class MailboxSyncService:
                 processor="historical_inbox",
                 since_utc=since_utc,
             )
-            self._bootstrap_folder(
+            sent_result = self._bootstrap_folder(
                 user_id=user_id,
                 primary_email=primary_email,
                 display_name=display_name,
@@ -77,13 +77,21 @@ class MailboxSyncService:
             with self.session_factory() as session:
                 mark_bootstrap_completed(session, user_id)
                 session.commit()
+            return {
+                "user_id": user_id,
+                "bootstrap_status": "completed",
+                "folders": {
+                    "inbox": inbox_result,
+                    "sentitems": sent_result,
+                },
+            }
         except Exception as exc:
             with self.session_factory() as session:
                 mark_bootstrap_failed(session, user_id, str(exc))
                 session.commit()
             raise
 
-    def poll_user(self, user_id: str) -> None:
+    def poll_user(self, user_id: str) -> dict[str, object]:
         session: Session = self.session_factory()
         try:
             user = get_user(session, user_id)
@@ -91,7 +99,7 @@ class MailboxSyncService:
             state = get_or_create_user_mailbox_state(session, user_id)
             if user is None or account is None or not state.polling_enabled:
                 session.commit()
-                return
+                return {"user_id": user_id, "status": "skipped", "reason": "polling_disabled"}
             primary_email = user.primary_email
             display_name = user.display_name
             timezone_name = user.timezone
@@ -102,7 +110,7 @@ class MailboxSyncService:
         finally:
             session.close()
 
-        self._poll_folder(
+        inbox_result = self._poll_folder(
             user_id=user_id,
             primary_email=primary_email,
             display_name=display_name,
@@ -113,7 +121,7 @@ class MailboxSyncService:
             sync_type="poll_inbox",
             process_mode="live",
         )
-        self._poll_folder(
+        sent_result = self._poll_folder(
             user_id=user_id,
             primary_email=primary_email,
             display_name=display_name,
@@ -128,6 +136,14 @@ class MailboxSyncService:
         with self.session_factory() as session:
             update_poll_timestamp(session, user_id)
             session.commit()
+        return {
+            "user_id": user_id,
+            "status": "completed",
+            "folders": {
+                "inbox": inbox_result,
+                "sentitems": sent_result,
+            },
+        }
 
     def _bootstrap_folder(
         self,
@@ -141,7 +157,7 @@ class MailboxSyncService:
         sync_type: str,
         processor: str,
         since_utc: datetime,
-    ) -> None:
+    ) -> dict[str, object]:
         with self.session_factory() as session:
             sync_run = create_sync_run(session, user_id=user_id, sync_type=sync_type, status="started")
             sync_run_id = sync_run.id
@@ -183,6 +199,13 @@ class MailboxSyncService:
                     items_failed=items_failed,
                 )
                 session.commit()
+            return {
+                "sync_type": sync_type,
+                "status": "success",
+                "items_seen": items_seen,
+                "items_processed": items_processed,
+                "items_failed": items_failed,
+            }
         except Exception as exc:
             with self.session_factory() as session:
                 finalize_sync_run(
@@ -209,7 +232,7 @@ class MailboxSyncService:
         delta_token: str | None,
         sync_type: str,
         process_mode: str,
-    ) -> None:
+    ) -> dict[str, object]:
         with self.session_factory() as session:
             sync_run = create_sync_run(
                 session,
@@ -275,6 +298,14 @@ class MailboxSyncService:
                     items_failed=items_failed,
                 )
                 session.commit()
+            return {
+                "sync_type": sync_type,
+                "status": "success",
+                "cursor_after": next_delta_token,
+                "items_seen": items_seen,
+                "items_processed": items_processed,
+                "items_failed": items_failed,
+            }
         except Exception as exc:
             with self.session_factory() as session:
                 finalize_sync_run(

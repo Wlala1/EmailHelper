@@ -235,3 +235,37 @@ class DraftWriteStatusResponse(BaseModel):
     outlook_draft_id: Optional[str] = None
     outlook_web_link: Optional[str] = None
     error_message: Optional[str] = None
+
+
+class FeedbackEventRequest(BaseModel):
+    """Request body for submitting a user feedback signal on an agent suggestion."""
+
+    user_id: str
+    email_id: str
+    target_type: str = Field(
+        description="What is being rated: schedule_candidate | reply_suggestion | tone_template | draft_write"
+    )
+    target_id: str = Field(description="ID of the schedule candidate, reply suggestion, or draft being rated")
+    feedback_signal: str = Field(
+        description="User action: accepted | rejected | edited | dismissed | deferred"
+    )
+    feedback_metadata: dict = Field(
+        default_factory=dict,
+        description="Optional context, e.g. {tone_key: 'professional', conflict_score_at_time: 0.3}",
+    )
+
+    @field_validator("target_type")
+    @classmethod
+    def validate_target_type(cls, v: str) -> str:
+        allowed = {"schedule_candidate", "reply_suggestion", "tone_template", "draft_write"}
+        if v not in allowed:
+            raise ValueError(f"target_type must be one of {allowed}")
+        return v
+
+    @field_validator("feedback_signal")
+    @classmethod
+    def validate_feedback_signal(cls, v: str) -> str:
+        allowed = {"accepted", "rejected", "edited", "dismissed", "deferred"}
+        if v not in allowed:
+            raise ValueError(f"feedback_signal must be one of {allowed}")
+        return v

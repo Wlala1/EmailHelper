@@ -16,6 +16,7 @@ OUMA_SCHEMA_VERSION = os.getenv("OUMA_SCHEMA_VERSION", "ouma.v2")
 API_TITLE = "OUMA Email Assistant API"
 API_VERSION = "2.0.0"
 DEFAULT_USER_TIMEZONE = os.getenv("DEFAULT_USER_TIMEZONE", "Asia/Singapore")
+APP_ROLE = os.getenv("APP_ROLE", "api").lower()
 
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -25,13 +26,20 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OPENAI_STYLE_PROFILE_MODEL = os.getenv("OPENAI_STYLE_PROFILE_MODEL", OPENAI_MODEL)
 
 # Database
+# Local dev defaults to SQLite. Set DATABASE_URL=postgresql+psycopg://... in .env or docker-compose.
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{(DATA_DIR / 'ouma.db').as_posix()}")
 SQL_ECHO = os.getenv("SQL_ECHO", "false").lower() == "true"
+AUTO_CREATE_SCHEMA = os.getenv(
+    "AUTO_CREATE_SCHEMA",
+    "true" if DATABASE_URL.startswith("sqlite") else "false",
+).lower() == "true"
 
 # Neo4j
 NEO4J_URI = os.getenv("NEO4J_URI", "")
 NEO4J_USER = os.getenv("NEO4J_USER", "")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
+# Set to "true" in production (Docker). App refuses to start if Neo4j unreachable.
+NEO4J_REQUIRED = os.getenv("NEO4J_REQUIRED", "false").lower() == "true"
 
 # Microsoft Azure / Outlook
 AZURE_CLIENT_ID = os.getenv("AZURE_CLIENT_ID", "")
@@ -57,3 +65,9 @@ BACKGROUND_LOOP_INTERVAL_SECONDS = int(os.getenv("BACKGROUND_LOOP_INTERVAL_SECON
 LEASE_DURATION_SECONDS = int(os.getenv("LEASE_DURATION_SECONDS", "120"))
 ENABLE_BACKGROUND_WORKERS = os.getenv("ENABLE_BACKGROUND_WORKERS", "true").lower() == "true"
 AUTO_DRAFT_RELATIONSHIP_THRESHOLD = float(os.getenv("AUTO_DRAFT_RELATIONSHIP_THRESHOLD", "0.8"))
+
+# Feature flags for gradual rollout
+# Enable time-decayed relationship weights (Phase B)
+USE_DECAYED_WEIGHT = os.getenv("USE_DECAYED_WEIGHT", "false").lower() == "true"
+# Enable behavioral preference vector for tone/schedule ranking (Phase E)
+USE_PREFERENCE_VECTOR = os.getenv("USE_PREFERENCE_VECTOR", "false").lower() == "true"

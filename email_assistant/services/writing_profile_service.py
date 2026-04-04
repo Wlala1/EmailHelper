@@ -7,8 +7,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from config import BOOTSTRAP_MAX_PROFILE_EMAILS
-from models import Email
-from repositories import get_recent_sent_emails, upsert_user_writing_profile
+from datetime import datetime, timezone
+
+from models import Email, UserWritingProfile
+from repositories import get_feedback_events_for_user, get_recent_sent_emails, upsert_user_writing_profile
 
 GREETING_PATTERNS = [
     r"^(dear[^\n]{0,80})",
@@ -124,6 +126,8 @@ def rebuild_user_writing_profile(session: Session, user_id: str) -> dict[str, An
         sample_count=sample_count,
         profile_payload=profile_payload,
     )
+    # Also refresh the preference vector while rebuilding the profile.
+    update_preference_vector(session, user_id)
     return {
         "preferred_language": preferred_language,
         "tone_profile": tone_profile,
@@ -134,3 +138,62 @@ def rebuild_user_writing_profile(session: Session, user_id: str) -> dict[str, An
         "cta_patterns": cta_patterns,
         "sample_count": sample_count,
     }
+
+
+def update_preference_vector(session: Session, user_id: str) -> dict:
+    """Recompute and persist the preference_vector on UserWritingProfile.
+
+    Reads all UserFeedbackEvent rows for the user and calculates:
+      - tone_accept_rates[tone_key]: accepted / (accepted + rejected + edited)
+      - schedule_accept_rate: accepted / (accepted + rejected) for schedule_candidate
+      - feedback_count: total events considered
+
+    The result is stored in UserWritingProfile.preference_vector.
+    Returns the new preference_vector dict.
+    """
+    events = get_feedback_events_for_user(session, user_id)
+    if not events:
+        return {}
+
+    # Tone template feedback.
+    tone_counts: dict[str, dict[str, int]] = {}  # {tone_key: {signal: count}}
+    # Schedule candidate feedback.
+    schedule_accepted = 0
+    schedule_rejected = 0
+    feedback_count = len(events)
+
+    for event in events:
+        signal = event.feedback_signal
+        if event.target_type in ("tone_template", "reply_suggestion"):
+            tone_key = (event.feedback_metadata or {}).get("tone_key")
+            if tone_key:
+                bucket = tone_counts.setdefault(tone_key, {"accepted": 0, "rejected": 0, "edited": 0})
+                if signal in bucket:
+                    bucket[signal] += 1
+        elif event.target_type == "schedule_candidate":
+            if signal == "accepted":
+                schedule_accepted += 1
+            elif signal == "rejected":
+                schedule_rejected += 1
+
+    tone_accept_rates: dict[str, float] = {}
+    for tone_key, counts in tone_counts.items():
+        denominator = counts["accepted"] + counts["rejected"] + counts["edited"]
+        if denominator > 0:
+            tone_accept_rates[tone_key] = round(counts["accepted"] / denominator, 4)
+
+    sched_denom = schedule_accepted + schedule_rejected
+    schedule_accept_rate = round(schedule_accepted / sched_denom, 4) if sched_denom > 0 else 0.5
+
+    preference_vector = {
+        "tone_accept_rates": tone_accept_rates,
+        "schedule_accept_rate": schedule_accept_rate,
+        "feedback_count": feedback_count,
+    }
+
+    # Persist to the profile row.
+    profile = session.get(UserWritingProfile, user_id)
+    if profile is not None:
+        profile.preference_vector = preference_vector
+        profile.preference_vector_updated_at_utc = datetime.now(timezone.utc)
+    return preference_vector

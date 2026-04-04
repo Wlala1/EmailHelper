@@ -1,0 +1,64 @@
+{
+  "name": "OUMA Email Processing Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/users_due_for_poll",
+        "options": {}
+      },
+      "name": "Get Users Due for Poll",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "user_ids",
+        "options": {}
+      },
+      "name": "Split by User",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/poll_user/{{ $json.user_id }}",
+        "options": {}
+      },
+      "name": "Poll User",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Get Users Due for Poll", "type": "main", "index": 0 }]]
+    },
+    "Get Users Due for Poll": {
+      "main": [[{ "node": "Split by User", "type": "main", "index": 0 }]]
+    },
+    "Split by User": {
+      "main": [[{ "node": "Poll User", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": ""
+  },
+  "tags": ["ouma", "email-processing"]
+}
