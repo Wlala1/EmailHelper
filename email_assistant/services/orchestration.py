@@ -120,16 +120,27 @@ def execute_intake(
     )
 
 
-def execute_classifier(session_factory: sessionmaker, *, trace_id: str, email_id: str, user_id: str) -> dict[str, Any]:
+def execute_classifier(
+    session_factory: sessionmaker,
+    *,
+    trace_id: str,
+    email_id: str,
+    user_id: str,
+    category_catalog_override: Optional[list[dict[str, str]]] = None,
+) -> dict[str, Any]:
     return _execute_agent_step(
         session_factory,
         agent_name="classifier",
         trace_id=trace_id,
         email_id=email_id,
         user_id=user_id,
-        input_payload={"email_id": email_id},
+        input_payload={
+            "email_id": email_id,
+            "category_catalog_override": category_catalog_override or [],
+        },
         runner=run_classifier,
         error_code="CLASSIFIER_ERROR",
+        runner_kwargs={"category_catalog_override": category_catalog_override},
     )
 
 
@@ -340,16 +351,17 @@ def _should_auto_create_draft(
 def maybe_create_reply_draft(session_factory: sessionmaker, *, user_id: str, email_id: str) -> dict[str, Any]:
     session: Session = session_factory()
     try:
-        email = get_email(session, email_id)
         reply = get_current_reply_suggestion(session, email_id)
-        classifier = get_current_classifier(session, email_id)
-        relationship_snapshot = get_relationship_snapshot(session, email_id)
-        top_candidate = get_current_top_schedule_candidate(session, email_id)
-        profile = get_user_writing_profile(session, user_id)
         latest_write = get_latest_reply_draft_write(session, email_id)
-        if email is None or reply is None:
+        if reply is None:
             raise ValueError(f"reply suggestion missing for email {email_id}")
-        if latest_write and latest_write.reply_suggestion_id == reply.id and latest_write.draft_status in {"written", "skipped"}:
+        if latest_write and latest_write.reply_suggestion_id == reply.id and latest_write.draft_status in {
+            "pending_review",
+            "written",
+            "rejected",
+            "deferred",
+            "skipped",
+        }:
             return {
                 "draft_status": latest_write.draft_status,
                 "policy_name": latest_write.policy_name,
@@ -358,45 +370,25 @@ def maybe_create_reply_draft(session_factory: sessionmaker, *, user_id: str, ema
                 "error_message": latest_write.error_message,
             }
 
-        should_write, reason = _should_auto_create_draft(
-            email=email,
-            classifier=classifier,
-            relationship_snapshot=relationship_snapshot,
-            top_candidate=top_candidate,
-            reply_required=reply.reply_required,
-        )
-        if not should_write:
+        if not reply.reply_required:
             record = create_reply_draft_write(
                 session,
                 reply_suggestion_id=reply.id,
                 user_id=user_id,
                 email_id=email_id,
-                policy_name=reason,
+                policy_name="reply_not_required",
                 draft_status="skipped",
             )
             session.commit()
-            return {"draft_status": record.draft_status, "policy_name": reason}
+            return {"draft_status": record.draft_status, "policy_name": record.policy_name}
 
-        tone_key = _preferred_tone_key({
-            "tone_profile": profile.tone_profile if profile else None,
-            "preference_vector": dict(getattr(profile, "preference_vector", None) or {}) if profile else {},
-        })
-        body_html = reply.tone_templates.get(tone_key) or next(iter(reply.tone_templates.values()), "")
-        draft = create_reply_draft(
-            session,
-            user_id=user_id,
-            message_id=email.graph_message_id or email.email_id,
-            body_html=body_html,
-        )
         record = create_reply_draft_write(
             session,
             reply_suggestion_id=reply.id,
             user_id=user_id,
             email_id=email_id,
-            policy_name=reason,
-            draft_status="written",
-            outlook_draft_id=draft.get("id"),
-            outlook_web_link=draft.get("webLink"),
+            policy_name="pending_human_review",
+            draft_status="pending_review",
         )
         session.commit()
         return {

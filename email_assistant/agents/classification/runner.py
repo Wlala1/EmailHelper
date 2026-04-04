@@ -30,6 +30,7 @@ def run_classifier(
     run_id: str,
     email_id: str,
     user_id: str,
+    category_catalog_override: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     email = get_email(session, email_id)
     if email is None:
@@ -84,7 +85,7 @@ def run_classifier(
         )
         attachment_status = AgentRunStatus.skipped.value
 
-    existing_categories = [
+    existing_categories = category_catalog_override or [
         {"category_name": item.category_name, "category_description": item.category_description}
         for item in get_category_definitions(session, user_id)
     ]

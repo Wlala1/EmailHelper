@@ -70,4 +70,16 @@ def build_trace_email_status(session: Session, *, trace_id: str, email_id: str) 
         }
         if latest_draft_write
         else None,
+        "current_reply_review": {
+            "review_required": bool(response.reply_required),
+            "pending_review": bool(
+                latest_draft_write
+                and latest_draft_write.reply_suggestion_id == response.id
+                and latest_draft_write.draft_status == "pending_review"
+            ),
+            "draft_status": latest_draft_write.draft_status if latest_draft_write else None,
+            "policy_name": latest_draft_write.policy_name if latest_draft_write else None,
+        }
+        if response
+        else None,
     }

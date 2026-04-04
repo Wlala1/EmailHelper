@@ -7,9 +7,16 @@ from api.dependencies import get_db
 from config import OUMA_SCHEMA_VERSION
 from db import SessionLocal
 from repositories import create_feedback_event, get_user_writing_profile
-from schemas import FeedbackEventRequest, OUMAEnvelope
+from schemas import (
+    FeedbackEventRequest,
+    OUMAEnvelope,
+    ReplyReviewRequest,
+    ReplyReviewResultResponse,
+    ReplyReviewStatusResponse,
+)
 from services.agent_run_service import envelope_response, run_agent_envelope
 from services.calendar_feedback_service import sync_calendar_event_feedback
+from services.reply_review_service import get_reply_review_status, submit_reply_review
 from services.writing_profile_service import rebuild_user_writing_profile, update_preference_vector
 
 router = APIRouter(tags=["agents"])
@@ -45,6 +52,31 @@ def schedule_run(env: OUMAEnvelope, db: Session = Depends(get_db)):
 @router.post("/v2/agents/response/run", response_model=dict)
 def response_run(env: OUMAEnvelope, db: Session = Depends(get_db)):
     return _run(env, "response", db)
+
+
+@router.get("/v2/agents/response/review/{email_id}", response_model=ReplyReviewStatusResponse)
+def response_review_status(email_id: str, db: Session = Depends(get_db)):
+    try:
+        return get_reply_review_status(db, email_id=email_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/v2/agents/response/review/{email_id}", response_model=ReplyReviewResultResponse)
+def response_review_submit(email_id: str, body: ReplyReviewRequest, db: Session = Depends(get_db)):
+    try:
+        result = submit_reply_review(db, email_id=email_id, body=body)
+        db.commit()
+        return result
+    except HTTPException:
+        db.rollback()
+        raise
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/v2/feedback/event", response_model=dict, tags=["feedback"])

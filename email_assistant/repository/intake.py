@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from models import Attachment, Email, EmailRecipient, User
+from models import Attachment, ClassifierResult, Email, EmailRecipient, User
 from schemas import AttachmentPayload, EmailPayload, EmailRecipientPayload, UserPayload
 from utils import ensure_utc, utcnow
 
@@ -134,3 +134,26 @@ def get_email_by_graph_immutable_id(session: Session, *, user_id: str, graph_imm
 
 def get_email_attachments(session: Session, email_id: str) -> list[Attachment]:
     return session.scalars(select(Attachment).where(Attachment.email_id == email_id)).all()
+
+
+def get_unclassified_emails_for_user(session: Session, user_id: str, *, limit: int) -> list[Email]:
+    current_classifier = (
+        select(ClassifierResult.email_id)
+        .where(
+            ClassifierResult.email_id == Email.email_id,
+            ClassifierResult.is_current.is_(True),
+        )
+        .correlate(Email)
+        .exists()
+    )
+    return session.scalars(
+        select(Email)
+        .where(
+            and_(
+                Email.user_id == user_id,
+                ~current_classifier,
+            )
+        )
+        .order_by(Email.received_at_utc.asc(), Email.created_at_utc.asc())
+        .limit(limit)
+    ).all()

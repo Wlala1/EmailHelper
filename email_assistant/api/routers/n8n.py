@@ -15,6 +15,8 @@ from repositories import (
     get_user_writing_profile,
     release_lease,
 )
+from schemas import BackfillClassifierRequest, BackfillClassifierResponse
+from services.batch_backfill_service import backfill_classifier_for_user
 from services.calendar_feedback_service import sync_calendar_event_feedback
 from services.mailbox_sync_service import MailboxSyncService
 from services.writing_profile_service import rebuild_user_writing_profile
@@ -110,5 +112,35 @@ def rebuild_profile(user_id: str):
 
     try:
         return _with_lease(f"n8n:profile:{user_id}", _rebuild)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/v2/n8n/backfill_classifier/{user_id}", response_model=BackfillClassifierResponse)
+def backfill_classifier(user_id: str, body: BackfillClassifierRequest):
+    try:
+        result = _with_lease(
+            f"n8n:classifier-backfill:{user_id}",
+            lambda: backfill_classifier_for_user(
+                SessionLocal,
+                user_id=user_id,
+                sample_size=body.sample_size,
+                process_limit=body.process_limit,
+            ),
+        )
+        if result.get("status") == "skipped":
+            return {
+                "status": "skipped",
+                "reason": result.get("reason"),
+                "user_id": user_id,
+                "sample_size": body.sample_size,
+                "process_limit": body.process_limit,
+                "topics": [],
+                "processed_email_ids": [],
+                "failed_email_ids": [],
+                "processed_count": 0,
+                "failed_count": 0,
+            }
+        return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

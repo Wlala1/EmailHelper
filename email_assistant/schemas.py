@@ -37,6 +37,12 @@ class WriteStatus(str, Enum):
     failed = "failed"
 
 
+class ReplyReviewAction(str, Enum):
+    approve = "approve"
+    reject = "reject"
+    defer = "defer"
+
+
 class BootstrapStatus(str, Enum):
     not_started = "not_started"
     running = "running"
@@ -198,6 +204,7 @@ class BranchStatusResponse(BaseModel):
     top_schedule_candidate: Optional[dict[str, Any]] = None
     current_response: Optional[dict[str, Any]] = None
     current_draft_write: Optional[dict[str, Any]] = None
+    current_reply_review: Optional[dict[str, Any]] = None
 
 
 class MailboxConnectionResponse(BaseModel):
@@ -235,6 +242,63 @@ class DraftWriteStatusResponse(BaseModel):
     outlook_draft_id: Optional[str] = None
     outlook_web_link: Optional[str] = None
     error_message: Optional[str] = None
+
+
+class DynamicTopicDefinition(BaseModel):
+    category_name: str
+    category_description: str
+
+
+class BackfillClassifierRequest(BaseModel):
+    sample_size: int = Field(default=50, ge=1, le=200)
+    process_limit: int = Field(default=50, ge=1, le=500)
+
+
+class BackfillClassifierResponse(BaseModel):
+    status: str = "success"
+    reason: Optional[str] = None
+    user_id: str
+    sample_size: int
+    process_limit: int
+    topics: list[DynamicTopicDefinition] = Field(default_factory=list)
+    processed_email_ids: list[str] = Field(default_factory=list)
+    failed_email_ids: list[str] = Field(default_factory=list)
+    processed_count: int = 0
+    failed_count: int = 0
+
+
+class ReplyReviewRequest(BaseModel):
+    reply_suggestion_id: int
+    action: ReplyReviewAction
+    tone_key: Optional[str] = None
+    edited_body: Optional[str] = None
+
+
+class ReplyReviewStatusResponse(BaseModel):
+    email_id: str
+    user_id: str
+    reply_suggestion_id: int
+    reply_required: bool
+    decision_reason: Optional[str] = None
+    tone_templates: dict[str, str] = Field(default_factory=dict)
+    review_required: bool
+    pending_review: bool
+    latest_draft_write: Optional[dict[str, Any]] = None
+
+
+class ReplyReviewResultResponse(BaseModel):
+    email_id: str
+    user_id: str
+    reply_suggestion_id: int
+    action: ReplyReviewAction
+    feedback_signal: str
+    draft_status: str
+    policy_name: str
+    outlook_draft_id: Optional[str] = None
+    outlook_web_link: Optional[str] = None
+    error_message: Optional[str] = None
+    pending_review: bool = False
+    preference_vector: dict[str, Any] = Field(default_factory=dict)
 
 
 class FeedbackEventRequest(BaseModel):
