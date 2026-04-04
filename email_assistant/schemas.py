@@ -37,6 +37,29 @@ class WriteStatus(str, Enum):
     failed = "failed"
 
 
+class BootstrapStatus(str, Enum):
+    not_started = "not_started"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+
+
+class EmailDirection(str, Enum):
+    inbound = "inbound"
+    outbound = "outbound"
+
+
+class MailboxFolder(str, Enum):
+    inbox = "inbox"
+    sent = "sent"
+    other = "other"
+
+
+class ProcessedMode(str, Enum):
+    bootstrap = "bootstrap"
+    live = "live"
+
+
 class OUMAEnvelope(BaseModel):
     schema_version: str = Field(default=OUMA_SCHEMA_VERSION)
     trace_id: str
@@ -68,6 +91,7 @@ class EmailPayload(BaseModel):
     graph_immutable_id: Optional[str] = None
     internet_message_id: Optional[str] = None
     conversation_id: Optional[str] = None
+    graph_parent_folder_id: Optional[str] = None
     sender_name: Optional[str] = None
     sender_email: str
     subject: Optional[str] = None
@@ -76,6 +100,10 @@ class EmailPayload(BaseModel):
     body_preview: Optional[str] = None
     received_at_utc: datetime
     has_attachments: bool = False
+    direction: Optional[EmailDirection] = None
+    mailbox_folder: Optional[MailboxFolder] = None
+    mailbox_last_modified_at_utc: Optional[datetime] = None
+    processed_mode: Optional[ProcessedMode] = None
 
 
 class EmailRecipientPayload(BaseModel):
@@ -103,6 +131,9 @@ class ClassifierOutput(BaseModel):
     sender_role: str
     named_entities: list[str] = Field(default_factory=list)
     time_expressions: list[str] = Field(default_factory=list)
+    attachment_context_mode: Optional[str] = None
+    attachment_raw_chars: int = 0
+    attachment_context_chars: int = 0
 
 
 class AttachmentResultItem(BaseModel):
@@ -113,6 +144,9 @@ class AttachmentResultItem(BaseModel):
     named_entities: list[str] = Field(default_factory=list)
     time_expressions: list[str] = Field(default_factory=list)
     extracted_text: Optional[str] = None
+    raw_chars: int = 0
+    included_chars: int = 0
+    included_mode: Optional[str] = None
 
 
 class RelationshipObservationItem(BaseModel):
@@ -152,6 +186,7 @@ class ResponseOutput(BaseModel):
     reply_required: bool
     decision_reason: Optional[str] = None
     tone_templates: dict[str, str] = Field(default_factory=dict)
+    draft_write: Optional[dict[str, Any]] = None
 
 
 class BranchStatusResponse(BaseModel):
@@ -162,3 +197,41 @@ class BranchStatusResponse(BaseModel):
     current_attachment_status: Optional[str] = None
     top_schedule_candidate: Optional[dict[str, Any]] = None
     current_response: Optional[dict[str, Any]] = None
+    current_draft_write: Optional[dict[str, Any]] = None
+
+
+class MailboxConnectionResponse(BaseModel):
+    user_id: str
+    primary_email: Optional[str] = None
+    display_name: Optional[str] = None
+    mailbox_connected: bool
+    bootstrap_status: BootstrapStatus
+    polling_enabled: bool
+    inbox_delta_token: Optional[str] = None
+    sent_delta_token: Optional[str] = None
+
+
+class UserModeStatusResponse(BaseModel):
+    user_id: str
+    primary_email: Optional[str] = None
+    display_name: Optional[str] = None
+    mailbox_connected: bool
+    bootstrap_status: BootstrapStatus
+    bootstrap_started_at_utc: Optional[datetime] = None
+    bootstrap_completed_at_utc: Optional[datetime] = None
+    bootstrap_error: Optional[str] = None
+    polling_enabled: bool
+    last_poll_at_utc: Optional[datetime] = None
+    active_mode: str
+    preferred_language: Optional[str] = None
+    tone_profile: Optional[str] = None
+    avg_length_bucket: Optional[str] = None
+    sample_count: int = 0
+
+
+class DraftWriteStatusResponse(BaseModel):
+    draft_status: str
+    policy_name: str
+    outlook_draft_id: Optional[str] = None
+    outlook_web_link: Optional[str] = None
+    error_message: Optional[str] = None

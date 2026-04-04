@@ -9,7 +9,6 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 ATTACHMENTS_DIR = DATA_DIR / "attachments"
 LOGS_DIR = BASE_DIR / "logs"
-TOKEN_FILE = BASE_DIR / "o365_token.txt"
 
 OUMA_SCHEMA_VERSION = os.getenv("OUMA_SCHEMA_VERSION", "ouma.v2")
 
@@ -21,7 +20,9 @@ DEFAULT_USER_TIMEZONE = os.getenv("DEFAULT_USER_TIMEZONE", "Asia/Singapore")
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+OPENAI_ATTACHMENT_SUMMARY_MODEL = os.getenv("OPENAI_ATTACHMENT_SUMMARY_MODEL", OPENAI_MODEL)
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+OPENAI_STYLE_PROFILE_MODEL = os.getenv("OPENAI_STYLE_PROFILE_MODEL", OPENAI_MODEL)
 
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{(DATA_DIR / 'ouma.db').as_posix()}")
@@ -36,8 +37,23 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 AZURE_CLIENT_ID = os.getenv("AZURE_CLIENT_ID", "")
 AZURE_CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET", "")
 AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID", "")
+AZURE_REDIRECT_URI = os.getenv("AZURE_REDIRECT_URI", "http://localhost:8000/auth/microsoft/callback")
+AZURE_SCOPE = os.getenv(
+    "AZURE_SCOPE",
+    "offline_access openid profile User.Read Mail.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite",
+)
+MICROSOFT_AUTH_BASE_URL = os.getenv("MICROSOFT_AUTH_BASE_URL", "https://login.microsoftonline.com")
+MICROSOFT_GRAPH_BASE_URL = os.getenv("MICROSOFT_GRAPH_BASE_URL", "https://graph.microsoft.com/v1.0")
 
 # Agent settings
 MAX_ATTACHMENT_TEXT_LENGTH = int(os.getenv("MAX_ATTACHMENT_TEXT_LENGTH", "200000"))
+MAX_ATTACHMENT_CONTEXT_CHARS = int(os.getenv("MAX_ATTACHMENT_CONTEXT_CHARS", "8000"))
 MAX_CLASSIFIER_CONTEXT_CHARS = int(os.getenv("MAX_CLASSIFIER_CONTEXT_CHARS", "12000"))
 MAX_RESPONSE_CONTEXT_CHARS = int(os.getenv("MAX_RESPONSE_CONTEXT_CHARS", "6000"))
+BOOTSTRAP_LOOKBACK_DAYS = int(os.getenv("BOOTSTRAP_LOOKBACK_DAYS", "180"))
+BOOTSTRAP_MAX_PROFILE_EMAILS = int(os.getenv("BOOTSTRAP_MAX_PROFILE_EMAILS", "200"))
+POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "300"))
+BACKGROUND_LOOP_INTERVAL_SECONDS = int(os.getenv("BACKGROUND_LOOP_INTERVAL_SECONDS", "30"))
+LEASE_DURATION_SECONDS = int(os.getenv("LEASE_DURATION_SECONDS", "120"))
+ENABLE_BACKGROUND_WORKERS = os.getenv("ENABLE_BACKGROUND_WORKERS", "true").lower() == "true"
+AUTO_DRAFT_RELATIONSHIP_THRESHOLD = float(os.getenv("AUTO_DRAFT_RELATIONSHIP_THRESHOLD", "0.8"))

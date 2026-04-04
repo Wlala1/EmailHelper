@@ -7,14 +7,10 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from config import (
-    AZURE_CLIENT_ID,
-    AZURE_CLIENT_SECRET,
-    AZURE_TENANT_ID,
     DEFAULT_USER_TIMEZONE,
     NEO4J_PASSWORD,
     NEO4J_URI,
     NEO4J_USER,
-    TOKEN_FILE,
 )
 from models import ScheduleCandidate
 from repositories import (
@@ -24,6 +20,7 @@ from repositories import (
     get_relationship_snapshot,
     set_non_current_schedule,
 )
+from services.mailbox_actions_service import create_tentative_event
 
 try:
     from dateutil import parser as dt_parser
@@ -34,13 +31,6 @@ try:
     from neo4j import GraphDatabase
 except Exception:  # pragma: no cover - optional dependency
     GraphDatabase = None
-
-try:
-    from O365 import Account, FileSystemTokenBackend
-except Exception:  # pragma: no cover - optional dependency
-    Account = None
-    FileSystemTokenBackend = None
-
 
 def _parse_time_expression(expression: str) -> Optional[datetime]:
     expression = expression.strip()
@@ -67,41 +57,13 @@ def _parse_time_expression(expression: str) -> Optional[datetime]:
     return None
 
 
-def _write_outlook_event(candidate: dict[str, Any]) -> tuple[str, Optional[str], Optional[str], Optional[str]]:
-    if Account is None or FileSystemTokenBackend is None:
-        return "failed", None, None, "O365 SDK not installed"
-    if not (AZURE_CLIENT_ID and AZURE_CLIENT_SECRET and AZURE_TENANT_ID):
-        return "failed", None, None, "Azure credentials missing"
-
-    try:
-        token_backend = FileSystemTokenBackend(
-            token_path=str(TOKEN_FILE.parent),
-            token_filename=TOKEN_FILE.name,
-        )
-        credentials = (AZURE_CLIENT_ID, AZURE_CLIENT_SECRET)
-        account = Account(
-            credentials,
-            auth_flow_type="authorization",
-            tenant_id=AZURE_TENANT_ID,
-            token_backend=token_backend,
-        )
-        if not account.is_authenticated:
-            account.authenticate(scopes=["basic", "calendar_all"])
-
-        schedule = account.schedule()
-        calendar = schedule.get_default_calendar()
-        event = calendar.new_event()
-        event.subject = candidate["title"]
-        event.body = f"OUMA transaction_id={candidate['transaction_id']}"
-        event.start = candidate["start_time_utc"]
-        event.end = candidate["end_time_utc"]
-        event.show_as = candidate.get("show_as", "tentative")
-        event.save()
-        event_id = getattr(event, "object_id", None)
-        web_link = getattr(event, "web_link", None)
-        return "written", event_id, web_link, None
-    except Exception as exc:
-        return "failed", None, None, str(exc)
+def _write_outlook_event(
+    session: Session,
+    *,
+    user_id: str,
+    candidate: dict[str, Any],
+) -> tuple[str, Optional[str], Optional[str], Optional[str]]:
+    return create_tentative_event(session, user_id=user_id, candidate=candidate)
 
 
 def _sync_candidates_to_neo4j(candidates: list[dict[str, Any]], user_id: str) -> dict[str, Any]:
@@ -243,7 +205,11 @@ def run_schedule(
 
     for item in candidates:
         if item["action"] == "create_tentative_event":
-            write_status, event_id, web_link, error = _write_outlook_event(item)
+            write_status, event_id, web_link, error = _write_outlook_event(
+                session,
+                user_id=user_id,
+                candidate=item,
+            )
             item["write_status"] = write_status
             item["outlook_event_id"] = event_id
             item["outlook_weblink"] = web_link

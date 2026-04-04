@@ -1,9 +1,0 @@
-{
-  "user_id": "self",
-  "preferred_style": "warm",
-  "preferred_summary_length": "short",
-  "auto_send_reply": false,
-  "reply_language": "zh",
-  "follow_up_categories": ["fundraiser", "customer"],
-  "last_updated": null
-}
