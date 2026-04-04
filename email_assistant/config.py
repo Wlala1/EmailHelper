@@ -17,6 +17,14 @@ API_TITLE = "OUMA Email Assistant API"
 API_VERSION = "2.0.0"
 DEFAULT_USER_TIMEZONE = os.getenv("DEFAULT_USER_TIMEZONE", "Asia/Singapore")
 APP_ROLE = os.getenv("APP_ROLE", "api").lower()
+FRONTEND_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "FRONTEND_ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if origin.strip()
+]
 
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -65,6 +73,7 @@ BACKGROUND_LOOP_INTERVAL_SECONDS = int(os.getenv("BACKGROUND_LOOP_INTERVAL_SECON
 LEASE_DURATION_SECONDS = int(os.getenv("LEASE_DURATION_SECONDS", "120"))
 ENABLE_BACKGROUND_WORKERS = os.getenv("ENABLE_BACKGROUND_WORKERS", "true").lower() == "true"
 AUTO_DRAFT_RELATIONSHIP_THRESHOLD = float(os.getenv("AUTO_DRAFT_RELATIONSHIP_THRESHOLD", "0.8"))
+CATEGORY_SUGGESTION_BACKFILL_LIMIT = int(os.getenv("CATEGORY_SUGGESTION_BACKFILL_LIMIT", "100"))
 
 # Feature flags for gradual rollout
 # Enable time-decayed relationship weights (Phase B)

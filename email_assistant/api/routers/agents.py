@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_db
@@ -8,6 +8,10 @@ from config import OUMA_SCHEMA_VERSION
 from db import SessionLocal
 from repositories import create_feedback_event, get_user_writing_profile
 from schemas import (
+    CategorySuggestionDecisionRequest,
+    CategorySuggestionDecisionResponse,
+    CategorySuggestionListResponse,
+    CategorySuggestionStatus,
     FeedbackEventRequest,
     OUMAEnvelope,
     ReplyReviewRequest,
@@ -16,6 +20,7 @@ from schemas import (
 )
 from services.agent_run_service import envelope_response, run_agent_envelope
 from services.calendar_feedback_service import sync_calendar_event_feedback
+from services.category_suggestion_service import decide_category_suggestion, list_category_suggestions_for_user
 from services.reply_review_service import get_reply_review_status, submit_reply_review
 from services.writing_profile_service import rebuild_user_writing_profile, update_preference_vector
 
@@ -52,6 +57,36 @@ def schedule_run(env: OUMAEnvelope, db: Session = Depends(get_db)):
 @router.post("/v2/agents/response/run", response_model=dict)
 def response_run(env: OUMAEnvelope, db: Session = Depends(get_db)):
     return _run(env, "response", db)
+
+
+@router.get("/v2/agents/classifier/tag_suggestions/{user_id}", response_model=CategorySuggestionListResponse)
+def classifier_tag_suggestions(
+    user_id: str,
+    status: list[CategorySuggestionStatus] | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    statuses = [item.value for item in status] if status else None
+    return list_category_suggestions_for_user(db, user_id=user_id, statuses=statuses)
+
+
+@router.post(
+    "/v2/agents/classifier/tag_suggestions/{suggestion_id}",
+    response_model=CategorySuggestionDecisionResponse,
+)
+def classifier_tag_suggestion_decision(
+    suggestion_id: str,
+    body: CategorySuggestionDecisionRequest,
+):
+    try:
+        return decide_category_suggestion(
+            SessionLocal,
+            suggestion_id=suggestion_id,
+            action=body.action.value,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/v2/agents/response/review/{email_id}", response_model=ReplyReviewStatusResponse)

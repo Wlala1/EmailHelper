@@ -1,0 +1,64 @@
+{
+  "name": "OUMA Category Suggestion Refresh",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 12 }]
+        }
+      },
+      "name": "Refresh Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 280]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/active_users",
+        "options": {}
+      },
+      "name": "Get Active Users",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 280]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "user_ids",
+        "options": {}
+      },
+      "name": "Split by User",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [640, 280]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/generate_tag_suggestions/{{ $json.user_id }}",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"sample_size\": 50,\n  \"process_limit\": 50\n}",
+        "options": {}
+      },
+      "name": "Generate Tag Suggestions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [860, 280]
+    }
+  ],
+  "connections": {
+    "Refresh Trigger": {
+      "main": [[{ "node": "Get Active Users", "type": "main", "index": 0 }]]
+    },
+    "Get Active Users": {
+      "main": [[{ "node": "Split by User", "type": "main", "index": 0 }]]
+    },
+    "Split by User": {
+      "main": [[{ "node": "Generate Tag Suggestions", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "tags": ["ouma", "classifier", "tag-suggestions"]
+}

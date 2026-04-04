@@ -127,7 +127,15 @@ def normalize_category_name(name: str) -> str:
         return "General Updates"
     if len(name) > 64:
         name = name[:64].strip()
-    return name.title()
+    normalized = name.title()
+    proposal_aliases = {
+        "Course Updates": "Canvas Course Updates",
+        "Canvas Updates": "Canvas Course Updates",
+        "Canvas Course Update": "Canvas Course Updates",
+        "Career Opportunities": "Campus/Faculty Career Opportunities",
+        "Campus Faculty Career Opportunities": "Campus/Faculty Career Opportunities",
+    }
+    return proposal_aliases.get(normalized, normalized)
 
 
 def tokenize(text: str) -> set[str]:

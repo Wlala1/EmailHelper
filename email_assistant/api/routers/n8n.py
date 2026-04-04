@@ -15,9 +15,9 @@ from repositories import (
     get_user_writing_profile,
     release_lease,
 )
-from schemas import BackfillClassifierRequest, BackfillClassifierResponse
-from services.batch_backfill_service import backfill_classifier_for_user
+from schemas import CategorySuggestionRefreshRequest, CategorySuggestionRefreshResponse
 from services.calendar_feedback_service import sync_calendar_event_feedback
+from services.category_suggestion_service import generate_category_suggestions_for_user
 from services.mailbox_sync_service import MailboxSyncService
 from services.writing_profile_service import rebuild_user_writing_profile
 
@@ -116,12 +116,13 @@ def rebuild_profile(user_id: str):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/v2/n8n/backfill_classifier/{user_id}", response_model=BackfillClassifierResponse)
-def backfill_classifier(user_id: str, body: BackfillClassifierRequest):
+@router.post("/v2/n8n/backfill_classifier/{user_id}", response_model=CategorySuggestionRefreshResponse)
+@router.post("/v2/n8n/generate_tag_suggestions/{user_id}", response_model=CategorySuggestionRefreshResponse)
+def backfill_classifier(user_id: str, body: CategorySuggestionRefreshRequest):
     try:
         result = _with_lease(
             f"n8n:classifier-backfill:{user_id}",
-            lambda: backfill_classifier_for_user(
+            lambda: generate_category_suggestions_for_user(
                 SessionLocal,
                 user_id=user_id,
                 sample_size=body.sample_size,
@@ -135,11 +136,8 @@ def backfill_classifier(user_id: str, body: BackfillClassifierRequest):
                 "user_id": user_id,
                 "sample_size": body.sample_size,
                 "process_limit": body.process_limit,
-                "topics": [],
-                "processed_email_ids": [],
-                "failed_email_ids": [],
-                "processed_count": 0,
-                "failed_count": 0,
+                "generated_count": 0,
+                "suggestions": [],
             }
         return result
     except Exception as exc:

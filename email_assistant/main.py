@@ -3,9 +3,10 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from api.routers import agents, auth, n8n, status
-from config import API_TITLE, API_VERSION, APP_ROLE, ENABLE_BACKGROUND_WORKERS
+from config import API_TITLE, API_VERSION, APP_ROLE, ENABLE_BACKGROUND_WORKERS, FRONTEND_ALLOWED_ORIGINS
 from db import init_db
 from services.background_worker import mailbox_worker
 from services.neo4j_service import verify_neo4j_connection
@@ -31,6 +32,14 @@ app = FastAPI(
     version=API_VERSION,
     lifespan=lifespan,
 )
+if FRONTEND_ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=FRONTEND_ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 app.include_router(auth.router)
 app.include_router(agents.router)
 app.include_router(n8n.router)

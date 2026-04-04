@@ -30,9 +30,9 @@ def heuristic_new_category_name(subject: str, text: str) -> str:
     if "call for papers" in combined or "cfp" in combined or "submission" in combined:
         return "Academic Conferences"
     if "canvas" in combined or "assignment" in combined or "quiz" in combined or "grade" in combined:
-        return "Course Updates"
+        return "Canvas Course Updates"
     if "career" in combined or "intern" in combined or "job fair" in combined or "recruit" in combined:
-        return "Career Opportunities"
+        return "Campus/Faculty Career Opportunities"
     if "teams meeting" in combined or "microsoft teams" in combined or "join meeting" in combined:
         return "Teams Meetings"
     if "event" in combined or "social" in combined or "club" in combined:

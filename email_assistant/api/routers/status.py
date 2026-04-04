@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 from api.dependencies import get_db
 from config import OUMA_SCHEMA_VERSION
 from models import UserMailboxState
-from schemas import UserModeStatusResponse
+from schemas import UserDashboardResponse, UserModeStatusResponse
 from services.graph_service import GraphServiceError
 from services.mailbox_state_service import build_user_status_response, retry_bootstrap
+from services.dashboard_service import build_user_dashboard
 from services.status_service import build_trace_email_status
 
 router = APIRouter(tags=["status"])
@@ -23,6 +24,11 @@ def health() -> dict[str, str]:
 @router.get("/v2/users/{user_id}/status", response_model=UserModeStatusResponse)
 def user_status(user_id: str, db: Session = Depends(get_db)):
     return build_user_status_response(db, user_id)
+
+
+@router.get("/v2/users/{user_id}/dashboard", response_model=UserDashboardResponse)
+def user_dashboard(user_id: str, db: Session = Depends(get_db)):
+    return build_user_dashboard(db, user_id=user_id)
 
 
 @router.post("/v2/users/{user_id}/bootstrap/retry", response_model=UserModeStatusResponse)

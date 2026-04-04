@@ -134,6 +134,26 @@ class CategoryDefinition(Base):
     updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class CategorySuggestion(Base):
+    __tablename__ = "category_suggestions"
+
+    suggestion_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    category_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    category_description: Mapped[str] = mapped_column(Text, nullable=False)
+    supporting_email_ids: Mapped[list] = mapped_column(JSON, default=list)
+    supporting_subjects: Mapped[list] = mapped_column(JSON, default=list)
+    rationale_keywords: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    sample_size: Mapped[int] = mapped_column(Integer, default=0)
+    process_limit: Mapped[int] = mapped_column(Integer, default=0)
+    created_from_email_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    promoted_category_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    decided_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class AttachmentResult(Base):
     __tablename__ = "attachment_results"
 

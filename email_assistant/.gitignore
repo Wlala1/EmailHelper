@@ -7,3 +7,6 @@ logs/*.log
 .env
 .DS_Store
 o365_token.txt
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo

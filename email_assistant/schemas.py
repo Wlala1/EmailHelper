@@ -43,6 +43,17 @@ class ReplyReviewAction(str, Enum):
     defer = "defer"
 
 
+class CategorySuggestionStatus(str, Enum):
+    pending = "pending"
+    accepted = "accepted"
+    rejected = "rejected"
+
+
+class CategorySuggestionAction(str, Enum):
+    accept = "accept"
+    reject = "reject"
+
+
 class BootstrapStatus(str, Enum):
     not_started = "not_started"
     running = "running"
@@ -249,22 +260,110 @@ class DynamicTopicDefinition(BaseModel):
     category_description: str
 
 
-class BackfillClassifierRequest(BaseModel):
+class CategorySuggestionRefreshRequest(BaseModel):
     sample_size: int = Field(default=50, ge=1, le=200)
     process_limit: int = Field(default=50, ge=1, le=500)
 
 
-class BackfillClassifierResponse(BaseModel):
+class CategorySuggestionItem(BaseModel):
+    suggestion_id: str
+    user_id: str
+    category_name: str
+    category_description: str
+    supporting_email_ids: list[str] = Field(default_factory=list)
+    supporting_subjects: list[str] = Field(default_factory=list)
+    rationale_keywords: list[str] = Field(default_factory=list)
+    status: CategorySuggestionStatus
+    sample_size: int = 0
+    process_limit: int = 0
+    created_from_email_id: Optional[str] = None
+    promoted_category_id: Optional[str] = None
+    decided_at_utc: Optional[datetime] = None
+    created_at_utc: datetime
+    updated_at_utc: datetime
+
+
+class CategorySuggestionListResponse(BaseModel):
+    user_id: str
+    suggestions: list[CategorySuggestionItem] = Field(default_factory=list)
+
+
+class CategorySuggestionDecisionRequest(BaseModel):
+    action: CategorySuggestionAction
+
+
+class CategorySuggestionDecisionResponse(BaseModel):
+    user_id: str
+    suggestion: CategorySuggestionItem
+    backfill: dict[str, Any] = Field(default_factory=dict)
+
+
+class CategorySuggestionRefreshResponse(BaseModel):
     status: str = "success"
     reason: Optional[str] = None
     user_id: str
     sample_size: int
     process_limit: int
-    topics: list[DynamicTopicDefinition] = Field(default_factory=list)
-    processed_email_ids: list[str] = Field(default_factory=list)
-    failed_email_ids: list[str] = Field(default_factory=list)
-    processed_count: int = 0
-    failed_count: int = 0
+    generated_count: int = 0
+    suggestions: list[CategorySuggestionItem] = Field(default_factory=list)
+
+
+class DashboardSummaryCard(BaseModel):
+    key: str
+    label: str
+    value: int
+    subtitle: Optional[str] = None
+
+
+class PendingReviewQueueItem(BaseModel):
+    email_id: str
+    user_id: str
+    reply_suggestion_id: Optional[int] = None
+    subject: Optional[str] = None
+    sender_name: Optional[str] = None
+    sender_email: Optional[str] = None
+    received_at_utc: datetime
+    decision_reason: Optional[str] = None
+    draft_status: str
+
+
+class DashboardSeriesItem(BaseModel):
+    label: str
+    value: int
+
+
+class RelationshipInsightItem(BaseModel):
+    person_email: str
+    person_name: Optional[str] = None
+    person_role: Optional[str] = None
+    organisation_name: Optional[str] = None
+    observation_count: int
+    relationship_weight: float
+
+
+class ScheduleOverviewResponse(BaseModel):
+    recent_written_count: int = 0
+    current_suggest_only_count: int = 0
+    proactive_candidate_count: int = 0
+
+
+class FeedbackOverviewResponse(BaseModel):
+    total_events: int = 0
+    recent_events: int = 0
+    signal_counts: dict[str, int] = Field(default_factory=dict)
+    preference_vector: dict[str, Any] = Field(default_factory=dict)
+
+
+class UserDashboardResponse(BaseModel):
+    user_id: str
+    summary_cards: list[DashboardSummaryCard] = Field(default_factory=list)
+    pending_review_items: list[PendingReviewQueueItem] = Field(default_factory=list)
+    pending_tag_suggestions: list[CategorySuggestionItem] = Field(default_factory=list)
+    category_distribution: list[DashboardSeriesItem] = Field(default_factory=list)
+    top_relationships: list[RelationshipInsightItem] = Field(default_factory=list)
+    schedule_overview: ScheduleOverviewResponse = Field(default_factory=ScheduleOverviewResponse)
+    feedback_overview: FeedbackOverviewResponse = Field(default_factory=FeedbackOverviewResponse)
+    last_refreshed_at_utc: datetime
 
 
 class ReplyReviewRequest(BaseModel):
