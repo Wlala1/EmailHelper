@@ -16,7 +16,7 @@ from services.neo4j_service import verify_neo4j_connection
 async def lifespan(_: FastAPI):
     init_db()
     verify_neo4j_connection()
-    should_start_worker = APP_ROLE == "dev_worker" and ENABLE_BACKGROUND_WORKERS
+    should_start_worker = ENABLE_BACKGROUND_WORKERS
     if should_start_worker:
         mailbox_worker.start()
     try:

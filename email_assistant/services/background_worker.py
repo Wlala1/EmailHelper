@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import threading
+import time
 from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from config import (
     BACKGROUND_LOOP_INTERVAL_SECONDS,
+    CATEGORY_SUGGESTION_INTERVAL_SECONDS,
     ENABLE_BACKGROUND_WORKERS,
     LEASE_DURATION_SECONDS,
     POLL_INTERVAL_SECONDS,
+    PROFILE_REBUILD_INTERVAL_SECONDS,
 )
 from db import SessionLocal
+from models import UserMailboxState
 from repositories import (
     acquire_lease,
     get_users_due_for_poll,
@@ -19,7 +24,9 @@ from repositories import (
     release_lease,
 )
 from services.calendar_feedback_service import sync_calendar_event_feedback
+from services.category_suggestion_service import generate_category_suggestions_for_user
 from services.mailbox_sync_service import MailboxSyncService
+from services.writing_profile_service import rebuild_user_writing_profile
 
 
 class MailboxWorker:
@@ -28,6 +35,8 @@ class MailboxWorker:
         self._stop = threading.Event()
         self.owner_id = f"worker-{uuid4()}"
         self.sync_service = MailboxSyncService(SessionLocal)
+        self._last_profile_rebuild_at: float = 0.0
+        self._last_category_suggestion_at: float = 0.0
 
     def start(self) -> None:
         if not ENABLE_BACKGROUND_WORKERS:
@@ -48,7 +57,24 @@ class MailboxWorker:
             self.run_bootstrap_cycle_once()
             self.run_poll_cycle_once()
             self.run_calendar_feedback_cycle_once()
+
+            now = time.time()
+            if now - self._last_profile_rebuild_at >= PROFILE_REBUILD_INTERVAL_SECONDS:
+                self.run_writing_profile_rebuild_cycle_once()
+                self._last_profile_rebuild_at = now
+
+            if now - self._last_category_suggestion_at >= CATEGORY_SUGGESTION_INTERVAL_SECONDS:
+                self.run_category_suggestion_cycle_once()
+                self._last_category_suggestion_at = now
+
             self._stop.wait(BACKGROUND_LOOP_INTERVAL_SECONDS)
+
+    def _get_active_user_ids(self) -> list[str]:
+        with SessionLocal() as session:
+            states = session.scalars(
+                select(UserMailboxState).where(UserMailboxState.mailbox_connected.is_(True))
+            ).all()
+            return [s.user_id for s in states]
 
     def run_bootstrap_cycle_once(self) -> None:
         with SessionLocal() as session:
@@ -96,6 +122,25 @@ class MailboxWorker:
             self._with_user_lease(
                 f"calendar-feedback:{user_id}",
                 lambda uid=user_id: sync_calendar_event_feedback(SessionLocal, user_id=uid),
+            )
+
+    def run_writing_profile_rebuild_cycle_once(self) -> None:
+        """Rebuild writing profile for all active users (runs every 24h)."""
+        for user_id in self._get_active_user_ids():
+            def _rebuild(uid=user_id):
+                with SessionLocal() as session:
+                    rebuild_user_writing_profile(session, uid)
+                    session.commit()
+            self._with_user_lease(f"profile-rebuild:{user_id}", _rebuild)
+
+    def run_category_suggestion_cycle_once(self) -> None:
+        """Refresh category suggestions for all active users (runs every 12h)."""
+        for user_id in self._get_active_user_ids():
+            self._with_user_lease(
+                f"category-suggestion:{user_id}",
+                lambda uid=user_id: generate_category_suggestions_for_user(
+                    SessionLocal, user_id=uid, sample_size=50, process_limit=50
+                ),
             )
 
     def _with_user_lease(self, lock_name: str, callback) -> None:
