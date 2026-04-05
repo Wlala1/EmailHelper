@@ -17,6 +17,7 @@ API_TITLE = "OUMA Email Assistant API"
 API_VERSION = "2.0.0"
 DEFAULT_USER_TIMEZONE = os.getenv("DEFAULT_USER_TIMEZONE", "Asia/Singapore")
 APP_ROLE = os.getenv("APP_ROLE", "api").lower()
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost")
 FRONTEND_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
@@ -52,7 +53,7 @@ NEO4J_REQUIRED = os.getenv("NEO4J_REQUIRED", "false").lower() == "true"
 # Microsoft Azure / Outlook
 AZURE_CLIENT_ID = os.getenv("AZURE_CLIENT_ID", "")
 AZURE_CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET", "")
-AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID", "")
+AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID", "common")
 AZURE_REDIRECT_URI = os.getenv("AZURE_REDIRECT_URI", "http://localhost:8000/auth/microsoft/callback")
 AZURE_SCOPE = os.getenv(
     "AZURE_SCOPE",

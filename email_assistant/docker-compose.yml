@@ -5,6 +5,23 @@ networks:
     driver: bridge
 
 services:
+  ouma-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks:
+      - ouma_net
+    environment:
+      POSTGRES_USER: ouma_user
+      POSTGRES_PASSWORD: ouma_password
+      POSTGRES_DB: ouma_email
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ouma_user -d ouma_email"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   neo4j:
     image: neo4j:5
     restart: unless-stopped
@@ -25,6 +42,19 @@ services:
       timeout: 10s
       retries: 12
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - ouma_net
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -43,6 +73,7 @@ services:
       APP_ROLE: api
       ENABLE_BACKGROUND_WORKERS: "true"
       AUTO_CREATE_SCHEMA: "false"
+      FRONTEND_BASE_URL: "http://localhost"
     volumes:
       - attachments_data:/app/data/attachments
     ports:
@@ -50,15 +81,18 @@ services:
     depends_on:
       neo4j:
         condition: service_healthy
+      ouma-db:
+        condition: service_healthy
     command: >
       sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
       retries: 6
 
 volumes:
+  postgres_data:
   neo4j_data:
   neo4j_logs:
   attachments_data:

@@ -234,6 +234,8 @@ def build_graph_intake_payload(
                 }
             )
 
+    from utils.pii import anonymize_text
+
     payload = {
         "user": {
             "user_id": user_id,
@@ -250,10 +252,10 @@ def build_graph_intake_payload(
             "graph_parent_folder_id": message.get("parentFolderId"),
             "sender_name": sender.get("name"),
             "sender_email": sender.get("address") or primary_email or "unknown@example.com",
-            "subject": message.get("subject"),
+            "subject": anonymize_text(message.get("subject") or ""),
             "body_content_type": body_content_type,
-            "body_content": body_content,
-            "body_preview": message.get("bodyPreview"),
+            "body_content": anonymize_text(body_content or ""),
+            "body_preview": anonymize_text(message.get("bodyPreview") or ""),
             "received_at_utc": received_at.isoformat(),
             "has_attachments": bool(message.get("hasAttachments")),
             "direction": direction,

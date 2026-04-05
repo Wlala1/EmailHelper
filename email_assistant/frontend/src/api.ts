@@ -104,6 +104,20 @@ export type ReplyReviewResult = {
   preference_vector: Record<string, unknown>;
 };
 
+export type UserStatus = {
+  user_id: string;
+  primary_email?: string | null;
+  display_name?: string | null;
+  mailbox_connected: boolean;
+  bootstrap_status: "pending" | "running" | "completed" | "failed";
+  bootstrap_started_at_utc?: string | null;
+  bootstrap_completed_at_utc?: string | null;
+  bootstrap_error?: string | null;
+  polling_enabled: boolean;
+  last_poll_at_utc?: string | null;
+  active_mode: string;
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -119,6 +133,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(detail || `Request failed: ${response.status}`);
   }
   return response.json() as Promise<T>;
+}
+
+export function getMicrosoftAuthUrl() {
+  return request<{ authorize_url: string; state: string }>("/auth/microsoft/start");
+}
+
+export function getUserStatus(userId: string) {
+  return request<UserStatus>(`/v2/users/${userId}/status`);
 }
 
 export function getDashboard(userId: string) {

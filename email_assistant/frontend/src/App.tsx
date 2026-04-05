@@ -1,237 +1,374 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import {
   CategorySuggestion,
   PendingReviewItem,
   ReplyReviewStatus,
   UserDashboard,
+  UserStatus,
   decideTagSuggestion,
   getDashboard,
+  getMicrosoftAuthUrl,
   getReplyReviewStatus,
   getTagSuggestions,
+  getUserStatus,
   refreshTagSuggestions,
   submitReplyReview,
 } from "./api";
 
+type AppState = "login" | "bootstrapping" | "dashboard";
 type ViewKey = "overview" | "review" | "tags" | "insights";
 
-const USER_ID_STORAGE_KEY = "ouma-demo-user-id";
+const USER_ID_KEY = "ouma-user-id";
 
 function formatDate(value?: string | null) {
-  if (!value) {
-    return "N/A";
-  }
+  if (!value) return "N/A";
   return new Date(value).toLocaleString();
 }
 
+// ─── Login page ──────────────────────────────────────────────────────────────
+
+function LoginPage({ onLogin, loading, error }: { onLogin: () => void; loading: boolean; error: string }) {
+  return (
+    <div className="login-page">
+      <div className="login-card">
+        <p className="eyebrow">OUMA</p>
+        <h1>Outlook Unified Multi-Agent</h1>
+        <p className="login-description">
+          Connect your Outlook mailbox to classify emails, build your relationship graph, and get
+          context-aware reply suggestions.
+        </p>
+        <button className="ms-login-btn" onClick={onLogin} disabled={loading}>
+          {loading ? "Redirecting…" : "Sign in with Microsoft"}
+        </button>
+        {error ? <p className="error-text">{error}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+// ─── Bootstrapping page ───────────────────────────────────────────────────────
+
+function BootstrappingPage({
+  status,
+  error,
+  onRetry,
+}: {
+  status: UserStatus | null;
+  error: string;
+  onRetry: () => void;
+}) {
+  const failed = status?.bootstrap_status === "failed";
+  return (
+    <div className="login-page">
+      <div className="login-card">
+        <p className="eyebrow">OUMA</p>
+        {failed ? (
+          <>
+            <h2>Sync failed</h2>
+            <p className="error-text">{status?.bootstrap_error || error || "Unknown error"}</p>
+            <button className="ms-login-btn" onClick={onRetry}>
+              Retry
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="bootstrap-spinner large" />
+            <h2>Syncing your mailbox…</h2>
+            {status && (
+              <p className="login-description">
+                Signed in as <strong>{status.display_name || status.primary_email}</strong>
+                <br />
+                Importing up to 180 days of email history. This may take a few minutes.
+              </p>
+            )}
+            <p className="muted-label">
+              Started {formatDate(status?.bootstrap_started_at_utc)}
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+
 function App() {
+  const [appState, setAppState] = useState<AppState>("login");
+  const [activeUserId, setActiveUserId] = useState("");
+  const [userStatus, setUserStatus] = useState<UserStatus | null>(null);
   const [view, setView] = useState<ViewKey>("overview");
-  const [userIdInput, setUserIdInput] = useState(() => localStorage.getItem(USER_ID_STORAGE_KEY) || "");
-  const [activeUserId, setActiveUserId] = useState(() => localStorage.getItem(USER_ID_STORAGE_KEY) || "");
   const [dashboard, setDashboard] = useState<UserDashboard | null>(null);
   const [suggestions, setSuggestions] = useState<CategorySuggestion[]>([]);
   const [selectedReviewItem, setSelectedReviewItem] = useState<PendingReviewItem | null>(null);
   const [reviewStatus, setReviewStatus] = useState<ReplyReviewStatus | null>(null);
-  const [selectedTone, setSelectedTone] = useState<string>("professional");
+  const [selectedTone, setSelectedTone] = useState("professional");
   const [editedBody, setEditedBody] = useState("");
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<string>("");
-  const [error, setError] = useState<string>("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  async function loadDashboard(targetUserId: string) {
-    if (!targetUserId.trim()) {
-      setError("Enter a user_id before loading the demo console.");
-      return;
-    }
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  async function loadDashboard(uid: string) {
     setLoading(true);
     setError("");
     try {
-      const [dashboardData, suggestionData] = await Promise.all([
-        getDashboard(targetUserId),
-        getTagSuggestions(targetUserId),
+      const [dashData, suggestData] = await Promise.all([
+        getDashboard(uid),
+        getTagSuggestions(uid),
       ]);
-      setDashboard(dashboardData);
-      setSuggestions(suggestionData.suggestions);
-      const firstPending = dashboardData.pending_review_items[0] || null;
-      setSelectedReviewItem(firstPending);
-      if (firstPending) {
-        const detail = await getReplyReviewStatus(firstPending.email_id);
+      setDashboard(dashData);
+      setSuggestions(suggestData.suggestions);
+      const first = dashData.pending_review_items[0] ?? null;
+      setSelectedReviewItem(first);
+      if (first) {
+        const detail = await getReplyReviewStatus(first.email_id);
         setReviewStatus(detail);
-        const initialTone = Object.keys(detail.tone_templates)[0] || "professional";
-        setSelectedTone(initialTone);
-        setEditedBody(detail.tone_templates[initialTone] || "");
+        const tone = Object.keys(detail.tone_templates)[0] ?? "professional";
+        setSelectedTone(tone);
+        setEditedBody(detail.tone_templates[tone] ?? "");
       } else {
         setReviewStatus(null);
         setEditedBody("");
       }
-      setActiveUserId(targetUserId);
-      localStorage.setItem(USER_ID_STORAGE_KEY, targetUserId);
       setMessage("Dashboard refreshed.");
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load dashboard");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load dashboard");
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    if (activeUserId) {
-      void loadDashboard(activeUserId);
+  function startBootstrapPoll(uid: string) {
+    if (pollRef.current) clearTimeout(pollRef.current);
+    const poll = async () => {
+      try {
+        const status = await getUserStatus(uid);
+        setUserStatus(status);
+        if (status.bootstrap_status === "completed") {
+          setAppState("dashboard");
+          await loadDashboard(uid);
+        } else if (status.bootstrap_status === "failed") {
+          // stay on bootstrapping page, show error
+        } else {
+          pollRef.current = setTimeout(() => { void poll(); }, 5000);
+        }
+      } catch {
+        pollRef.current = setTimeout(() => { void poll(); }, 5000);
+      }
+    };
+    void poll();
+  }
+
+  async function resolveSession(uid: string, isNewConnection: boolean) {
+    try {
+      const status = await getUserStatus(uid);
+      setUserStatus(status);
+      setActiveUserId(uid);
+      localStorage.setItem(USER_ID_KEY, uid);
+
+      if (isNewConnection && status.bootstrap_status !== "completed") {
+        setAppState("bootstrapping");
+        startBootstrapPoll(uid);
+      } else {
+        setAppState("dashboard");
+        await loadDashboard(uid);
+      }
+    } catch {
+      // user not found or network error → back to login
+      localStorage.removeItem(USER_ID_KEY);
+      setAppState("login");
     }
+  }
+
+  // ── Mount: check URL params or localStorage ────────────────────────────────
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlUserId = params.get("user_id");
+    const connected = params.get("connected") === "true";
+
+    if (urlUserId) {
+      window.history.replaceState({}, "", window.location.pathname);
+      void resolveSession(urlUserId, connected);
+    } else {
+      const stored = localStorage.getItem(USER_ID_KEY);
+      if (stored) {
+        void resolveSession(stored, false);
+      }
+      // else: stay on login
+    }
+
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
   }, []);
 
+  // ── Load review detail when selection changes ──────────────────────────────
+
   useEffect(() => {
-    if (!selectedReviewItem) {
-      return;
-    }
-    const emailId = selectedReviewItem.email_id;
+    if (!selectedReviewItem) return;
     let cancelled = false;
-    async function loadReviewDetail() {
+    const load = async () => {
       setLoading(true);
-      setError("");
       try {
-        const detail = await getReplyReviewStatus(emailId);
-        if (cancelled) {
-          return;
-        }
+        const detail = await getReplyReviewStatus(selectedReviewItem.email_id);
+        if (cancelled) return;
         setReviewStatus(detail);
-        const toneKeys = Object.keys(detail.tone_templates);
-        const nextTone = toneKeys.includes(selectedTone) ? selectedTone : toneKeys[0] || "professional";
-        setSelectedTone(nextTone);
-        setEditedBody(detail.tone_templates[nextTone] || "");
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : "Failed to load review detail");
-        }
+        const keys = Object.keys(detail.tone_templates);
+        const tone = keys.includes(selectedTone) ? selectedTone : (keys[0] ?? "professional");
+        setSelectedTone(tone);
+        setEditedBody(detail.tone_templates[tone] ?? "");
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load review");
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       }
-    }
-    void loadReviewDetail();
-    return () => {
-      cancelled = true;
     };
+    void load();
+    return () => { cancelled = true; };
   }, [selectedReviewItem?.email_id]);
 
-  function handleLoad(event: FormEvent) {
-    event.preventDefault();
-    void loadDashboard(userIdInput.trim());
+  // ── Actions ────────────────────────────────────────────────────────────────
+
+  async function handleMicrosoftLogin() {
+    setLoading(true);
+    setError("");
+    try {
+      const { authorize_url } = await getMicrosoftAuthUrl();
+      window.location.href = authorize_url;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start login");
+      setLoading(false);
+    }
+  }
+
+  function handleLogout() {
+    if (pollRef.current) clearTimeout(pollRef.current);
+    localStorage.removeItem(USER_ID_KEY);
+    setActiveUserId("");
+    setUserStatus(null);
+    setDashboard(null);
+    setSuggestions([]);
+    setAppState("login");
   }
 
   async function handleRefreshSuggestions() {
-    if (!activeUserId) {
-      setError("Load a user dashboard first.");
-      return;
-    }
+    if (!activeUserId) return;
     setLoading(true);
     setError("");
     try {
       const result = await refreshTagSuggestions(activeUserId);
       setMessage(
         result.generated_count > 0
-          ? `Generated ${result.generated_count} pending tag suggestion(s).`
-          : result.reason || "No new tag suggestions were generated.",
+          ? `Generated ${result.generated_count} new tag suggestion(s).`
+          : result.reason ?? "No new suggestions generated.",
       );
       await loadDashboard(activeUserId);
-    } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : "Failed to refresh suggestions");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to refresh suggestions");
       setLoading(false);
     }
   }
 
-  async function handleSuggestionDecision(suggestionId: string, action: "accept" | "reject") {
+  async function handleSuggestionDecision(id: string, action: "accept" | "reject") {
     setLoading(true);
     setError("");
     try {
-      const result = await decideTagSuggestion(suggestionId, action);
-      const backfillResult = result.backfill?.status ? ` Backfill: ${String(result.backfill.status)}.` : "";
-      setMessage(`Suggestion ${action}ed.${backfillResult}`);
-      if (activeUserId) {
-        await loadDashboard(activeUserId);
-      }
-    } catch (decisionError) {
-      setError(decisionError instanceof Error ? decisionError.message : "Failed to update suggestion");
+      const result = await decideTagSuggestion(id, action);
+      const extra = result.backfill?.status ? ` Backfill: ${String(result.backfill.status)}.` : "";
+      setMessage(`Suggestion ${action}ed.${extra}`);
+      await loadDashboard(activeUserId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update suggestion");
       setLoading(false);
     }
   }
 
   async function handleReviewAction(action: "approve" | "reject" | "defer") {
-    if (!selectedReviewItem || !reviewStatus) {
-      setError("Select a pending review item first.");
-      return;
-    }
+    if (!selectedReviewItem || !reviewStatus) return;
     setLoading(true);
     setError("");
     try {
-      const response = await submitReplyReview(selectedReviewItem.email_id, {
+      const res = await submitReplyReview(selectedReviewItem.email_id, {
         reply_suggestion_id: reviewStatus.reply_suggestion_id,
         action,
         tone_key: action === "approve" ? selectedTone : undefined,
         edited_body: action === "approve" ? editedBody : undefined,
       });
-      setMessage(`Review action recorded: ${response.draft_status}.`);
-      if (activeUserId) {
-        await loadDashboard(activeUserId);
-      }
-    } catch (reviewError) {
-      setError(reviewError instanceof Error ? reviewError.message : "Failed to submit review");
+      setMessage(`Review action recorded: ${res.draft_status}.`);
+      await loadDashboard(activeUserId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to submit review");
       setLoading(false);
     }
   }
 
-  const activeToneTemplate = reviewStatus?.tone_templates[selectedTone] || "";
+  // ── Render branches ────────────────────────────────────────────────────────
+
+  if (appState === "login") {
+    return <LoginPage onLogin={() => void handleMicrosoftLogin()} loading={loading} error={error} />;
+  }
+
+  if (appState === "bootstrapping") {
+    return (
+      <BootstrappingPage
+        status={userStatus}
+        error={error}
+        onRetry={() => { if (activeUserId) startBootstrapPoll(activeUserId); }}
+      />
+    );
+  }
+
+  // ── Dashboard ──────────────────────────────────────────────────────────────
 
   return (
     <div className="app-shell">
       <div className="aurora aurora-a" />
       <div className="aurora aurora-b" />
+
       <header className="hero">
-        <div>
-          <p className="eyebrow">OUMA Demo Console</p>
-          <h1>Proposal-aligned review, tagging, and insight cockpit</h1>
-          <p className="hero-copy">
-            n8n remains the system-level orchestrator. This console exposes the human review queue,
-            tag suggestion workflow, and the insight surfaces that were missing from the PDF demo story.
-          </p>
+        <div className="hero-left">
+          <p className="eyebrow">OUMA</p>
+          <h1>Outlook Unified Multi-Agent</h1>
         </div>
-        <form className="user-bar" onSubmit={handleLoad}>
-          <label>
-            Demo User ID
-            <input
-              value={userIdInput}
-              onChange={(event) => setUserIdInput(event.target.value)}
-              placeholder="student-demo"
-            />
-          </label>
-          <button type="submit" disabled={loading}>
-            Load Console
-          </button>
-          <button type="button" className="secondary" onClick={() => void handleRefreshSuggestions()} disabled={loading}>
-            Refresh Tag Suggestions
-          </button>
-        </form>
+        <div className="hero-right">
+          <div className="user-info">
+            <span className="user-name">{userStatus?.display_name ?? activeUserId}</span>
+            <span className="user-email">{userStatus?.primary_email}</span>
+          </div>
+          <div className="header-actions">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void handleRefreshSuggestions()}
+              disabled={loading}
+            >
+              Refresh Tags
+            </button>
+            <button type="button" className="secondary" onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </div>
         <div className="status-strip">
-          <span>{loading ? "Loading..." : message || "Ready"}</span>
+          <span>{loading ? "Loading…" : message || "Ready"}</span>
           {error ? <span className="error-text">{error}</span> : null}
         </div>
       </header>
 
       <nav className="nav-tabs">
-        {[
-          ["overview", "Overview"],
-          ["review", "Review Queue"],
-          ["tags", "Tag Suggestions"],
-          ["insights", "Insights"],
-        ].map(([key, label]) => (
+        {(["overview", "review", "tags", "insights"] as ViewKey[]).map((key) => (
           <button
             key={key}
             type="button"
             className={view === key ? "active" : ""}
-            onClick={() => setView(key as ViewKey)}
+            onClick={() => setView(key)}
           >
-            {label}
+            {key === "overview" ? "Overview" : key === "review" ? "Review Queue" : key === "tags" ? "Tag Suggestions" : "Insights"}
           </button>
         ))}
       </nav>
@@ -244,11 +381,11 @@ function App() {
               <p>Last refreshed: {formatDate(dashboard?.last_refreshed_at_utc)}</p>
             </div>
             <div className="card-grid">
-              {(dashboard?.summary_cards || []).map((card) => (
+              {(dashboard?.summary_cards ?? []).map((card) => (
                 <article key={card.key} className="metric-card">
                   <p>{card.label}</p>
                   <strong>{card.value}</strong>
-                  <span>{card.subtitle || ""}</span>
+                  <span>{card.subtitle ?? ""}</span>
                 </article>
               ))}
             </div>
@@ -264,15 +401,18 @@ function App() {
             <div className="overview-columns">
               <article className="mini-panel">
                 <h3>Pending Reply Queue</h3>
-                {(dashboard?.pending_review_items || []).map((item) => (
+                {(dashboard?.pending_review_items ?? []).map((item) => (
                   <div key={item.email_id} className="list-row">
                     <div>
-                      <strong>{item.subject || "(No Subject)"}</strong>
-                      <p>{item.sender_name || item.sender_email}</p>
+                      <strong>{item.subject ?? "(No Subject)"}</strong>
+                      <p>{item.sender_name ?? item.sender_email}</p>
                     </div>
                     <span>{formatDate(item.received_at_utc)}</span>
                   </div>
                 ))}
+                {(dashboard?.pending_review_items ?? []).length === 0 && (
+                  <div className="empty-state">No pending replies.</div>
+                )}
               </article>
               <article className="mini-panel">
                 <h3>Pending Tag Suggestions</h3>
@@ -282,6 +422,9 @@ function App() {
                     <p>{item.category_description}</p>
                   </div>
                 ))}
+                {suggestions.length === 0 && (
+                  <div className="empty-state">No pending suggestions.</div>
+                )}
               </article>
             </div>
           </section>
@@ -292,20 +435,20 @@ function App() {
             <div className="queue-column">
               <div className="section-heading">
                 <h2>Review Queue</h2>
-                <p>Reply drafts require human approval before Outlook draft write-back.</p>
+                <p>Reply drafts require approval before Outlook write-back.</p>
               </div>
-              {(dashboard?.pending_review_items || []).length === 0 ? (
-                <div className="empty-state">No pending review items for this user.</div>
+              {(dashboard?.pending_review_items ?? []).length === 0 ? (
+                <div className="empty-state">No pending review items.</div>
               ) : (
-                (dashboard?.pending_review_items || []).map((item) => (
+                (dashboard?.pending_review_items ?? []).map((item) => (
                   <button
                     type="button"
                     key={item.email_id}
                     className={`queue-item ${selectedReviewItem?.email_id === item.email_id ? "selected" : ""}`}
                     onClick={() => setSelectedReviewItem(item)}
                   >
-                    <strong>{item.subject || "(No Subject)"}</strong>
-                    <span>{item.sender_name || item.sender_email}</span>
+                    <strong>{item.subject ?? "(No Subject)"}</strong>
+                    <span>{item.sender_name ?? item.sender_email}</span>
                     <small>{formatDate(item.received_at_utc)}</small>
                   </button>
                 ))
@@ -315,8 +458,8 @@ function App() {
               {reviewStatus ? (
                 <>
                   <div className="section-heading">
-                    <h2>{selectedReviewItem?.subject || "Review Detail"}</h2>
-                    <p>{reviewStatus.decision_reason || "No decision reason available."}</p>
+                    <h2>{selectedReviewItem?.subject ?? "Review Detail"}</h2>
+                    <p>{reviewStatus.decision_reason ?? "No decision reason available."}</p>
                   </div>
                   <div className="tone-switcher">
                     {Object.entries(reviewStatus.tone_templates).map(([key, value]) => (
@@ -324,20 +467,13 @@ function App() {
                         key={key}
                         type="button"
                         className={selectedTone === key ? "active" : ""}
-                        onClick={() => {
-                          setSelectedTone(key);
-                          setEditedBody(value);
-                        }}
+                        onClick={() => { setSelectedTone(key); setEditedBody(value); }}
                       >
                         {key}
                       </button>
                     ))}
                   </div>
-                  <textarea
-                    value={editedBody}
-                    onChange={(event) => setEditedBody(event.target.value)}
-                    rows={14}
-                  />
+                  <textarea value={editedBody} onChange={(e) => setEditedBody(e.target.value)} rows={14} />
                   <div className="action-row">
                     <button type="button" onClick={() => void handleReviewAction("approve")} disabled={loading}>
                       Approve Draft
@@ -351,7 +487,7 @@ function App() {
                   </div>
                 </>
               ) : (
-                <div className="empty-state">Select a queue item to inspect tone templates and draft content.</div>
+                <div className="empty-state">Select a queue item to inspect tone templates.</div>
               )}
             </div>
           </section>
@@ -365,45 +501,41 @@ function App() {
             </div>
             <div className="suggestion-grid">
               {suggestions.length === 0 ? (
-                <div className="empty-state">No tag suggestions yet. Run the refresh action to generate them.</div>
+                <div className="empty-state">No tag suggestions. Click "Refresh Tags" to generate.</div>
               ) : (
-                suggestions.map((suggestion) => (
-                  <article key={suggestion.suggestion_id} className={`tag-card ${suggestion.status}`}>
+                suggestions.map((s) => (
+                  <article key={s.suggestion_id} className={`tag-card ${s.status}`}>
                     <div className="tag-head">
                       <div>
-                        <p className="status-badge">{suggestion.status}</p>
-                        <h3>{suggestion.category_name}</h3>
+                        <p className="status-badge">{s.status}</p>
+                        <h3>{s.category_name}</h3>
                       </div>
                       <div className="action-stack">
                         <button
                           type="button"
-                          onClick={() => void handleSuggestionDecision(suggestion.suggestion_id, "accept")}
-                          disabled={loading || suggestion.status === "accepted"}
+                          onClick={() => void handleSuggestionDecision(s.suggestion_id, "accept")}
+                          disabled={loading || s.status === "accepted"}
                         >
                           Accept
                         </button>
                         <button
                           type="button"
                           className="secondary"
-                          onClick={() => void handleSuggestionDecision(suggestion.suggestion_id, "reject")}
-                          disabled={loading || suggestion.status === "rejected"}
+                          onClick={() => void handleSuggestionDecision(s.suggestion_id, "reject")}
+                          disabled={loading || s.status === "rejected"}
                         >
                           Reject
                         </button>
                       </div>
                     </div>
-                    <p className="tag-description">{suggestion.category_description}</p>
+                    <p className="tag-description">{s.category_description}</p>
                     <div className="keyword-cloud">
-                      {suggestion.rationale_keywords.map((keyword) => (
-                        <span key={keyword}>{keyword}</span>
-                      ))}
+                      {s.rationale_keywords.map((kw) => <span key={kw}>{kw}</span>)}
                     </div>
                     <div className="support-list">
                       <h4>Supporting Subjects</h4>
-                      {suggestion.supporting_subjects.map((subject) => (
-                        <div key={subject} className="support-item">
-                          {subject}
-                        </div>
+                      {s.supporting_subjects.map((subj) => (
+                        <div key={subj} className="support-item">{subj}</div>
                       ))}
                     </div>
                   </article>
@@ -422,7 +554,7 @@ function App() {
             <div className="insight-columns">
               <article className="mini-panel">
                 <h3>Category Distribution</h3>
-                {(dashboard?.category_distribution || []).map((item) => (
+                {(dashboard?.category_distribution ?? []).map((item) => (
                   <div key={item.label} className="bar-row">
                     <span>{item.label}</span>
                     <div className="bar-track">
@@ -434,12 +566,12 @@ function App() {
               </article>
               <article className="mini-panel">
                 <h3>Relationship Highlights</h3>
-                {(dashboard?.top_relationships || []).map((item) => (
+                {(dashboard?.top_relationships ?? []).map((item) => (
                   <div key={item.person_email} className="relationship-item">
                     <div>
-                      <strong>{item.person_name || item.person_email}</strong>
+                      <strong>{item.person_name ?? item.person_email}</strong>
                       <p>
-                        {item.person_role || "Unknown role"}
+                        {item.person_role ?? "Unknown role"}
                         {item.organisation_name ? ` · ${item.organisation_name}` : ""}
                       </p>
                     </div>
@@ -453,31 +585,31 @@ function App() {
                 <h3>Schedule Overview</h3>
                 <div className="list-row">
                   <span>Recent tentative events written</span>
-                  <strong>{dashboard?.schedule_overview.recent_written_count || 0}</strong>
+                  <strong>{dashboard?.schedule_overview.recent_written_count ?? 0}</strong>
                 </div>
                 <div className="list-row">
                   <span>Current suggest-only candidates</span>
-                  <strong>{dashboard?.schedule_overview.current_suggest_only_count || 0}</strong>
+                  <strong>{dashboard?.schedule_overview.current_suggest_only_count ?? 0}</strong>
                 </div>
                 <div className="list-row">
                   <span>Proactive candidates</span>
-                  <strong>{dashboard?.schedule_overview.proactive_candidate_count || 0}</strong>
+                  <strong>{dashboard?.schedule_overview.proactive_candidate_count ?? 0}</strong>
                 </div>
               </article>
               <article className="mini-panel">
                 <h3>Preference Learning</h3>
                 <div className="list-row">
                   <span>Total feedback events</span>
-                  <strong>{dashboard?.feedback_overview.total_events || 0}</strong>
+                  <strong>{dashboard?.feedback_overview.total_events ?? 0}</strong>
                 </div>
                 <div className="list-row">
                   <span>Recent feedback events</span>
-                  <strong>{dashboard?.feedback_overview.recent_events || 0}</strong>
+                  <strong>{dashboard?.feedback_overview.recent_events ?? 0}</strong>
                 </div>
-                {Object.entries(dashboard?.feedback_overview.signal_counts || {}).map(([signal, count]) => (
-                  <div key={signal} className="list-row">
-                    <span>{signal}</span>
-                    <strong>{count}</strong>
+                {Object.entries(dashboard?.feedback_overview.signal_counts ?? {}).map(([sig, cnt]) => (
+                  <div key={sig} className="list-row">
+                    <span>{sig}</span>
+                    <strong>{cnt}</strong>
                   </div>
                 ))}
               </article>
