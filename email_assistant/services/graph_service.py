@@ -136,7 +136,7 @@ class MicrosoftGraphService:
         payload = self._graph_get(
             f"/me/messages/{message_id}/attachments",
             access_token=access_token,
-            query={"$select": "id,name,contentType,size,isInline,contentBytes,@odata.type"},
+            query={},
         )
         attachments: list[dict[str, Any]] = []
         for item in payload.get("value", []):

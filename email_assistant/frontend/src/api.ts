@@ -135,6 +135,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export function retryBootstrap(userId: string) {
+  return request<UserStatus>(`/v2/users/${userId}/bootstrap/retry`, { method: "POST" });
+}
+
 export function getMicrosoftAuthUrl() {
   return request<{ authorize_url: string; state: string }>("/auth/microsoft/start");
 }

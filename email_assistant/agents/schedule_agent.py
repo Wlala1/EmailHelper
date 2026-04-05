@@ -260,9 +260,7 @@ def run_schedule(
                 "title": classifier.summary[:80] or (email.subject or "OUMA Calendar Event"),
                 "start_time_utc": start_time,
                 "end_time_utc": end_time,
-                "source_timezone": relationship_snapshot.get("source_timezone", DEFAULT_USER_TIMEZONE)
-                if relationship_snapshot
-                else DEFAULT_USER_TIMEZONE,
+                "source_timezone": (relationship_snapshot.get("source_timezone") if relationship_snapshot else None) or DEFAULT_USER_TIMEZONE,
                 "is_all_day": False,
                 "location": None,
                 "attendees": [],

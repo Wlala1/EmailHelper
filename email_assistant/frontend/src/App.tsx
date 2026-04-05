@@ -13,6 +13,7 @@ import {
   getTagSuggestions,
   getUserStatus,
   refreshTagSuggestions,
+  retryBootstrap,
   submitReplyReview,
 } from "./api";
 
@@ -318,7 +319,15 @@ function App() {
       <BootstrappingPage
         status={userStatus}
         error={error}
-        onRetry={() => { if (activeUserId) startBootstrapPoll(activeUserId); }}
+        onRetry={async () => {
+          if (!activeUserId) return;
+          try {
+            await retryBootstrap(activeUserId);
+            startBootstrapPoll(activeUserId);
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "Retry failed");
+          }
+        }}
       />
     );
   }

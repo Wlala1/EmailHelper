@@ -27,7 +27,7 @@ class User(Base):
 class Email(Base):
     __tablename__ = "emails"
 
-    email_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    email_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
     graph_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     graph_immutable_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -69,7 +69,7 @@ class EmailRecipient(Base):
 class Attachment(Base):
     __tablename__ = "attachments"
 
-    attachment_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    attachment_id: Mapped[str] = mapped_column(String(512), primary_key=True)
     email_id: Mapped[str] = mapped_column(ForeignKey("emails.email_id"), index=True)
     graph_attachment_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -88,7 +88,7 @@ class AgentRun(Base):
 
     run_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     trace_id: Mapped[str] = mapped_column(String(128), index=True)
-    email_id: Mapped[str] = mapped_column(String(64), index=True)
+    email_id: Mapped[str] = mapped_column(String(255), index=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     agent_name: Mapped[str] = mapped_column(String(64), index=True)
     upstream_run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -110,7 +110,7 @@ class ClassifierResult(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(128), index=True)
     trace_id: Mapped[str] = mapped_column(String(128), index=True)
-    email_id: Mapped[str] = mapped_column(String(64), index=True)
+    email_id: Mapped[str] = mapped_column(String(255), index=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     category: Mapped[str] = mapped_column(String(128), nullable=False)
     urgency_score: Mapped[float] = mapped_column(Float, nullable=False)
@@ -130,7 +130,7 @@ class CategoryDefinition(Base):
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     category_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     category_description: Mapped[str] = mapped_column(Text, nullable=False)
-    created_from_email_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_from_email_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -148,7 +148,7 @@ class CategorySuggestion(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     sample_size: Mapped[int] = mapped_column(Integer, default=0)
     process_limit: Mapped[int] = mapped_column(Integer, default=0)
-    created_from_email_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_from_email_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     promoted_category_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     decided_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -161,9 +161,9 @@ class AttachmentResult(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(128), index=True)
     trace_id: Mapped[str] = mapped_column(String(128), index=True)
-    email_id: Mapped[str] = mapped_column(String(64), index=True)
+    email_id: Mapped[str] = mapped_column(String(255), index=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
-    attachment_id: Mapped[str] = mapped_column(String(64), index=True)
+    attachment_id: Mapped[str] = mapped_column(String(512), index=True)
     doc_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     relevance_score: Mapped[float] = mapped_column(Float, default=0.0)
     topics: Mapped[list] = mapped_column(JSON, default=list)
@@ -180,7 +180,7 @@ class RelationshipObservation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(128), index=True)
     trace_id: Mapped[str] = mapped_column(String(128), index=True)
-    email_id: Mapped[str] = mapped_column(String(64), index=True)
+    email_id: Mapped[str] = mapped_column(String(255), index=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     person_email: Mapped[str] = mapped_column(String(255), index=True)
     person_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -199,7 +199,7 @@ class ScheduleCandidate(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(128), index=True)
     trace_id: Mapped[str] = mapped_column(String(128), index=True)
-    email_id: Mapped[str] = mapped_column(String(64), index=True)
+    email_id: Mapped[str] = mapped_column(String(255), index=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     candidate_id: Mapped[str] = mapped_column(String(64), index=True)
     source: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -230,7 +230,7 @@ class ReplySuggestion(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(128), index=True)
     trace_id: Mapped[str] = mapped_column(String(128), index=True)
-    email_id: Mapped[str] = mapped_column(String(64), index=True)
+    email_id: Mapped[str] = mapped_column(String(255), index=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     reply_required: Mapped[bool] = mapped_column(Boolean, default=False)
     decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -302,7 +302,7 @@ class UserFeedbackEvent(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
-    email_id: Mapped[str] = mapped_column(String(64), index=True)
+    email_id: Mapped[str] = mapped_column(String(255), index=True)
     # What the user gave feedback on.
     target_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     # Values: "schedule_candidate" | "reply_suggestion" | "tone_template" | "draft_write"
@@ -338,7 +338,7 @@ class ReplyDraftWrite(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     reply_suggestion_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
-    email_id: Mapped[str] = mapped_column(String(64), index=True)
+    email_id: Mapped[str] = mapped_column(String(255), index=True)
     policy_name: Mapped[str] = mapped_column(String(128), nullable=False)
     draft_status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
     outlook_draft_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
