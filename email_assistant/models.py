@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db import Base
@@ -124,6 +124,7 @@ class ClassifierResult(Base):
 
 class CategoryDefinition(Base):
     __tablename__ = "category_definitions"
+    __table_args__ = (UniqueConstraint("user_id", "category_name", name="uq_category_definitions_user_name"),)
 
     category_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)

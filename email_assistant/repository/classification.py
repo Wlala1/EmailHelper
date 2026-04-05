@@ -6,6 +6,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import (
@@ -172,9 +173,6 @@ def create_category_definition(
     category_description: str,
     created_from_email_id: Optional[str] = None,
 ) -> CategoryDefinition:
-    existing = get_category_by_name(session, user_id, category_name)
-    if existing is not None:
-        return existing
     category = CategoryDefinition(
         category_id=str(uuid4()),
         user_id=user_id,
@@ -182,9 +180,13 @@ def create_category_definition(
         category_description=category_description,
         created_from_email_id=created_from_email_id,
     )
-    session.add(category)
-    session.flush()
-    return category
+    try:
+        with session.begin_nested():
+            session.add(category)
+        return category
+    except IntegrityError:
+        # Concurrent insert won the race; return the existing row.
+        return get_category_by_name(session, user_id, category_name)
 
 
 def get_current_reply_suggestion(session: Session, email_id: str) -> ReplySuggestion | None:

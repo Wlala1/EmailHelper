@@ -210,7 +210,23 @@ def get_person_context(
     RETURN p.role AS person_role,
            o.name AS org_name,
            o.domain AS org_domain,
-           coalesce(r.decayed_weight, r.weight) AS decayed_weight,
+           CASE
+             WHEN r.raw_weight IS NOT NULL AND r.last_observed_at IS NOT NULL
+             THEN
+               CASE
+                 WHEN toFloat(r.raw_weight) * exp(
+                   -0.007702 * toFloat(
+                     datetime().epochMillis - datetime(r.last_observed_at).epochMillis
+                   ) / 86400000.0
+                 ) > 1.0 THEN 1.0
+                 ELSE toFloat(r.raw_weight) * exp(
+                   -0.007702 * toFloat(
+                     datetime().epochMillis - datetime(r.last_observed_at).epochMillis
+                   ) / 86400000.0
+                 )
+               END
+             ELSE coalesce(toFloat(r.weight), 0.0)
+           END AS decayed_weight,
            r.observation_count AS observation_count,
            r.last_observed_at AS last_observed_at,
            collect(DISTINCT peer.email) AS shared_org_members,
