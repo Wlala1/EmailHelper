@@ -7,45 +7,54 @@
           "interval": [{ "field": "minutes", "minutesInterval": 5 }]
         }
       },
-      "name": "Schedule Trigger",
+      "id": "schedule-trigger",
+      "name": "Every 5 Minutes",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1,
-      "position": [250, 300]
+      "position": [240, 300]
     },
     {
       "parameters": {
-        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/users_due_for_poll",
-        "options": {}
+        "method": "GET",
+        "url": "http://api:8000/v2/n8n/users_due_for_poll",
+        "options": {
+          "timeout": 30000
+        }
       },
+      "id": "get-users",
       "name": "Get Users Due for Poll",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [450, 300]
+      "position": [440, 300]
     },
     {
       "parameters": {
         "fieldToSplitOut": "user_ids",
         "options": {}
       },
+      "id": "split-users",
       "name": "Split by User",
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
-      "position": [650, 300]
+      "position": [640, 300]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/poll_user/{{ $json.user_id }}",
-        "options": {}
+        "url": "=http://api:8000/v2/n8n/poll_user/{{ $json.value }}",
+        "options": {
+          "timeout": 120000
+        }
       },
+      "id": "poll-user",
       "name": "Poll User",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [850, 300]
+      "position": [840, 300]
     }
   ],
   "connections": {
-    "Schedule Trigger": {
+    "Every 5 Minutes": {
       "main": [[{ "node": "Get Users Due for Poll", "type": "main", "index": 0 }]]
     },
     "Get Users Due for Poll": {
@@ -56,9 +65,6 @@
     }
   },
   "active": true,
-  "settings": {
-    "executionOrder": "v1",
-    "errorWorkflow": ""
-  },
+  "settings": { "executionOrder": "v1" },
   "tags": ["ouma", "email-processing"]
 }

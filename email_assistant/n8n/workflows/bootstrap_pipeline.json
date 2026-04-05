@@ -7,41 +7,50 @@
           "interval": [{ "field": "minutes", "minutesInterval": 10 }]
         }
       },
+      "id": "bootstrap-trigger",
       "name": "Bootstrap Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1,
-      "position": [250, 300]
+      "position": [240, 300]
     },
     {
       "parameters": {
-        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/users_pending_bootstrap",
-        "options": {}
+        "method": "GET",
+        "url": "http://api:8000/v2/n8n/users_pending_bootstrap",
+        "options": {
+          "timeout": 30000
+        }
       },
+      "id": "get-pending",
       "name": "Get Users Pending Bootstrap",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [450, 300]
+      "position": [440, 300]
     },
     {
       "parameters": {
         "fieldToSplitOut": "user_ids",
         "options": {}
       },
+      "id": "split-users",
       "name": "Split by User",
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
-      "position": [650, 300]
+      "position": [640, 300]
     },
     {
       "parameters": {
-        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/bootstrap_user/{{ $json.user_id }}",
         "method": "POST",
-        "options": {}
+        "url": "=http://api:8000/v2/n8n/bootstrap_user/{{ $json.value }}",
+        "options": {
+          "timeout": 300000
+        }
       },
+      "id": "bootstrap-user",
       "name": "Bootstrap User",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [850, 300]
+      "position": [840, 300]
     }
   ],
   "connections": {

@@ -7,44 +7,49 @@
           "interval": [{ "field": "hours", "hoursInterval": 12 }]
         }
       },
+      "id": "refresh-trigger",
       "name": "Refresh Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1,
-      "position": [240, 280]
+      "position": [240, 300]
     },
     {
       "parameters": {
-        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/active_users",
-        "options": {}
+        "method": "GET",
+        "url": "http://api:8000/v2/n8n/active_users",
+        "options": { "timeout": 30000 }
       },
+      "id": "get-active",
       "name": "Get Active Users",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [440, 280]
+      "position": [440, 300]
     },
     {
       "parameters": {
         "fieldToSplitOut": "user_ids",
         "options": {}
       },
+      "id": "split-users",
       "name": "Split by User",
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
-      "position": [640, 280]
+      "position": [640, 300]
     },
     {
       "parameters": {
-        "url": "={{ $env.OUMA_API_URL }}/v2/n8n/generate_tag_suggestions/{{ $json.user_id }}",
         "method": "POST",
+        "url": "=http://api:8000/v2/n8n/generate_tag_suggestions/{{ $json.value }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"sample_size\": 50,\n  \"process_limit\": 50\n}",
-        "options": {}
+        "jsonBody": "{ \"sample_size\": 50, \"process_limit\": 50 }",
+        "options": { "timeout": 120000 }
       },
+      "id": "gen-tags",
       "name": "Generate Tag Suggestions",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [860, 280]
+      "position": [840, 300]
     }
   ],
   "connections": {

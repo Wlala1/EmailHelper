@@ -1,9 +1,15 @@
 version: "3.9"
 
+networks:
+  ouma_net:
+    driver: bridge
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    networks:
+      - ouma_net
     environment:
       POSTGRES_USER: ouma
       POSTGRES_PASSWORD: ouma
@@ -21,6 +27,8 @@ services:
   neo4j:
     image: neo4j:5
     restart: unless-stopped
+    networks:
+      - ouma_net
     environment:
       NEO4J_AUTH: neo4j/ouma_neo4j_pass
       NEO4J_PLUGINS: '["apoc"]'
@@ -38,11 +46,13 @@ services:
 
   api:
     build:
-      context: .
+      context: ./email_assistant
       dockerfile: Dockerfile
     restart: unless-stopped
+    networks:
+      - ouma_net
     env_file:
-      - .env.docker
+      - ./email_assistant/.env.docker
     environment:
       DATABASE_URL: postgresql+psycopg://ouma:ouma@db:5432/ouma
       NEO4J_URI: bolt://neo4j:7687
@@ -52,6 +62,10 @@ services:
       APP_ROLE: api
       ENABLE_BACKGROUND_WORKERS: "false"
       AUTO_CREATE_SCHEMA: "false"
+    volumes:
+      # 附件持久化 
+      - attachments_data:/app/data/attachments
+      - sqlite_data:/app/data
     ports:
       - "8000:8000"
     depends_on:
@@ -61,30 +75,36 @@ services:
         condition: service_healthy
     command: >
       sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
 
   n8n:
     image: n8nio/n8n:latest
     restart: unless-stopped
+    networks:
+      - ouma_net
     environment:
       N8N_HOST: 0.0.0.0
       N8N_PORT: 5678
       N8N_PROTOCOL: http
       WEBHOOK_URL: http://n8n:5678
-      # API target so workflows can reach the OUMA API inside Docker.
+      # 用 Docker 内网 service name，不再依赖 $env.OUMA_API_URL
       OUMA_API_URL: http://api:8000
-      # Persist workflows and credentials on a named volume.
       N8N_USER_FOLDER: /home/node/.n8n
-      # Load workflows from the /home/node/.n8n/workflows directory on startup.
-      N8N_IMPORT_EXPORT: "true"
       GENERIC_TIMEZONE: Asia/Singapore
+      # 关闭 n8n 的 telemetry 和 diagnostics，减少不必要的外部请求
+      N8N_DIAGNOSTICS_ENABLED: "false"
     volumes:
       - n8n_data:/home/node/.n8n
-      - ./n8n/workflows:/home/node/.n8n/workflows:ro
+      - ./email_assistant/n8n/workflows:/home/node/.n8n/workflows:ro
     ports:
       - "5678:5678"
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:5678/healthz"]
       interval: 10s
@@ -96,3 +116,5 @@ volumes:
   neo4j_data:
   neo4j_logs:
   n8n_data:
+  attachments_data:   
+  sqlite_data:        # SQLite fallback 持久化（如果不用 postgres）
