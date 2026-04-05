@@ -52,7 +52,7 @@ services:
     networks:
       - ouma_net
     env_file:
-      - ./email_assistant/.env.docker
+      - ./.env.docker
     environment:
       DATABASE_URL: postgresql+psycopg://ouma:ouma@db:5432/ouma
       NEO4J_URI: bolt://neo4j:7687
