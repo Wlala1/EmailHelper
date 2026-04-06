@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import Attachment, ClassifierResult, Email, EmailRecipient, User
@@ -54,6 +55,15 @@ def upsert_email(session: Session, user_id: str, email: EmailPayload) -> Email:
             processed_mode=email.processed_mode.value if email.processed_mode else None,
         )
         session.add(existing)
+        try:
+            session.flush()
+        except IntegrityError:
+            session.rollback()
+            # Another concurrent worker likely inserted this email. Reload and return it.
+            existing = session.get(Email, email.email_id)
+            if existing is None:
+                # If reload still fails, re-raise to surface the issue.
+                raise
     else:
         existing.user_id = user_id
         existing.graph_message_id = email.graph_message_id
