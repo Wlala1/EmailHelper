@@ -87,6 +87,10 @@ export type ReplyReviewStatus = {
     outlook_web_link?: string | null;
     error_message?: string | null;
   } | null;
+  email_subject?: string | null;
+  email_sender_name?: string | null;
+  email_sender_email?: string | null;
+  email_body_preview?: string | null;
 };
 
 export type ReplyReviewResult = {

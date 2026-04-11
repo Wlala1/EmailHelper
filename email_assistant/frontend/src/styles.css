@@ -579,6 +579,123 @@ button:disabled {
   to { transform: rotate(360deg); }
 }
 
+/* ─── Email context panel (Review Queue) ──────────────────────────────────── */
+
+.email-context-panel {
+  background: rgba(14, 124, 102, 0.06);
+  border: 1px solid rgba(14, 124, 102, 0.18);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.email-context-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.email-context-sender {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.email-context-addr {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.email-context-date {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.email-context-subject {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.email-context-body {
+  margin: 0 0 10px;
+  font-size: 0.83rem;
+  color: var(--muted);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.decision-reason-badge {
+  font-size: 0.78rem;
+  background: rgba(212, 162, 75, 0.12);
+  border: 1px solid rgba(212, 162, 75, 0.3);
+  border-radius: 6px;
+  padding: 5px 10px;
+  color: #92660a;
+}
+
+.decision-reason-label {
+  font-weight: 600;
+}
+
+.reply-draft-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+/* ─── Relationship Graph ──────────────────────────────────────────────────── */
+
+.graph-panel {
+  grid-column: 1 / -1;
+}
+
+.relationship-graph-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 0 2px;
+}
+
+.graph-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.graph-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.graph-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0;
+  opacity: 0.7;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     padding: 18px;

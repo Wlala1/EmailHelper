@@ -91,7 +91,7 @@ def _top_relationships(session: Session, *, user_id: str) -> list[dict]:
         aggregate.values(),
         key=lambda item: (item["observation_count"], item["person_email"]),
         reverse=True,
-    )[:6]
+    )[:20]
     for item in ranked:
         item["relationship_weight"] = round(min(1.0, item["observation_count"] / 10.0 + 0.5), 4)
     return ranked

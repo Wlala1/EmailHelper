@@ -16,6 +16,7 @@ import {
   retryBootstrap,
   submitReplyReview,
 } from "./api";
+import RelationshipGraph from "./RelationshipGraph";
 
 type AppState = "login" | "bootstrapping" | "dashboard";
 type ViewKey = "overview" | "review" | "tags" | "insights";
@@ -466,10 +467,27 @@ function App() {
             <div className="detail-column">
               {reviewStatus ? (
                 <>
-                  <div className="section-heading">
-                    <h2>{selectedReviewItem?.subject ?? "Review Detail"}</h2>
-                    <p>{reviewStatus.decision_reason ?? "No decision reason available."}</p>
+                  <div className="email-context-panel">
+                    <div className="email-context-meta">
+                      <span className="email-context-sender">
+                        {reviewStatus.email_sender_name ?? reviewStatus.email_sender_email ?? selectedReviewItem?.sender_name ?? "Unknown sender"}
+                        {reviewStatus.email_sender_name && reviewStatus.email_sender_email
+                          ? <span className="email-context-addr"> &lt;{reviewStatus.email_sender_email}&gt;</span>
+                          : null}
+                      </span>
+                      <span className="email-context-date">{formatDate(selectedReviewItem?.received_at_utc)}</span>
+                    </div>
+                    <h3 className="email-context-subject">{reviewStatus.email_subject ?? selectedReviewItem?.subject ?? "(No Subject)"}</h3>
+                    {reviewStatus.email_body_preview && (
+                      <p className="email-context-body">{reviewStatus.email_body_preview}</p>
+                    )}
+                    {reviewStatus.decision_reason && (
+                      <div className="decision-reason-badge">
+                        <span className="decision-reason-label">Why reply needed:</span> {reviewStatus.decision_reason}
+                      </div>
+                    )}
                   </div>
+                  <div className="reply-draft-label">Suggested reply</div>
                   <div className="tone-switcher">
                     {Object.entries(reviewStatus.tone_templates).map(([key, value]) => (
                       <button
@@ -482,7 +500,7 @@ function App() {
                       </button>
                     ))}
                   </div>
-                  <textarea value={editedBody} onChange={(e) => setEditedBody(e.target.value)} rows={14} />
+                  <textarea value={editedBody} onChange={(e) => setEditedBody(e.target.value)} rows={12} />
                   <div className="action-row">
                     <button type="button" onClick={() => void handleReviewAction("approve")} disabled={loading}>
                       Approve Draft
@@ -573,20 +591,14 @@ function App() {
                   </div>
                 ))}
               </article>
-              <article className="mini-panel">
-                <h3>Relationship Highlights</h3>
-                {(dashboard?.top_relationships ?? []).map((item) => (
-                  <div key={item.person_email} className="relationship-item">
-                    <div>
-                      <strong>{item.person_name ?? item.person_email}</strong>
-                      <p>
-                        {item.person_role ?? "Unknown role"}
-                        {item.organisation_name ? ` · ${item.organisation_name}` : ""}
-                      </p>
-                    </div>
-                    <span>{item.relationship_weight.toFixed(2)}</span>
-                  </div>
-                ))}
+              <article className="mini-panel graph-panel">
+                <h3>Relationship Graph</h3>
+                <RelationshipGraph
+                  relationships={dashboard?.top_relationships ?? []}
+                  userEmail={userStatus?.primary_email ?? activeUserId}
+                  width={640}
+                  height={420}
+                />
               </article>
             </div>
             <div className="insight-columns">

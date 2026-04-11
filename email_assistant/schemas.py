@@ -383,6 +383,10 @@ class ReplyReviewStatusResponse(BaseModel):
     review_required: bool
     pending_review: bool
     latest_draft_write: Optional[dict[str, Any]] = None
+    email_subject: Optional[str] = None
+    email_sender_name: Optional[str] = None
+    email_sender_email: Optional[str] = None
+    email_body_preview: Optional[str] = None
 
 
 class ReplyReviewResultResponse(BaseModel):

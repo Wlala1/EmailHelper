@@ -79,6 +79,10 @@ def get_reply_review_status(session: Session, *, email_id: str) -> dict[str, Any
         "review_required": bool(reply.reply_required),
         "pending_review": pending_review,
         "latest_draft_write": _serialize_draft_write(latest_write),
+        "email_subject": email.subject,
+        "email_sender_name": email.sender_name,
+        "email_sender_email": email.sender_email,
+        "email_body_preview": email.body_preview,
     }
 
 
