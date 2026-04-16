@@ -17,11 +17,15 @@ from schemas import (
     ReplyReviewRequest,
     ReplyReviewResultResponse,
     ReplyReviewStatusResponse,
+    ScheduleReviewCandidateListResponse,
+    ScheduleReviewRequest,
+    ScheduleReviewResponse,
 )
 from services.agent_run_service import envelope_response, run_agent_envelope
 from services.calendar_feedback_service import sync_calendar_event_feedback
 from services.category_suggestion_service import decide_category_suggestion, list_category_suggestions_for_user
 from services.reply_review_service import get_reply_review_status, submit_reply_review
+from services.schedule_review_service import list_schedule_candidates, submit_schedule_review
 from services.writing_profile_service import rebuild_user_writing_profile, update_preference_vector
 
 router = APIRouter(tags=["agents"])
@@ -109,6 +113,28 @@ def response_review_submit(email_id: str, body: ReplyReviewRequest, db: Session 
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/v2/agents/schedule/candidates/{user_id}", response_model=ScheduleReviewCandidateListResponse)
+def schedule_candidates_list(user_id: str, db: Session = Depends(get_db)):
+    return list_schedule_candidates(db, user_id=user_id)
+
+
+@router.post(
+    "/v2/agents/schedule/candidates/{candidate_id}/review",
+    response_model=ScheduleReviewResponse,
+)
+def schedule_candidate_review(candidate_id: str, body: ScheduleReviewRequest, db: Session = Depends(get_db)):
+    try:
+        result = submit_schedule_review(db, candidate_id=candidate_id, action=body.action.value)
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(exc))

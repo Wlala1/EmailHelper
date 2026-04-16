@@ -303,6 +303,7 @@ button:disabled {
 .detail-column {
   display: grid;
   gap: 14px;
+  align-content: start;
 }
 
 .queue-item {
@@ -653,6 +654,88 @@ button:disabled {
   letter-spacing: 0.06em;
   color: var(--muted);
   margin-bottom: 6px;
+}
+
+/* ─── Schedule candidate badges ─────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.badge-high {
+  background: rgba(14, 124, 102, 0.12);
+  color: var(--accent-strong);
+}
+
+.badge-medium {
+  background: rgba(212, 162, 75, 0.14);
+  color: #8a5e00;
+}
+
+.badge-low {
+  background: rgba(178, 71, 49, 0.1);
+  color: var(--danger);
+}
+
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.review-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.event-details-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.event-details-grid h3 {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+}
+
+.email-summary-block {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(24, 33, 45, 0.05);
+  border-left: 3px solid var(--accent);
+}
+
+.email-summary-block .muted-label {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.email-summary-block p:last-child {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--ink);
 }
 
 /* ─── Relationship Graph ──────────────────────────────────────────────────── */

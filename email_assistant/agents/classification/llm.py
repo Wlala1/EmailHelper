@@ -89,7 +89,7 @@ def llm_classify(
             "category_description": category_description.strip(),
             "is_new_category": is_new_category,
             "urgency_score": float(data.get("urgency_score", 0.5)),
-            "summary": str(data.get("summary", "")).strip() or "未生成摘要",
+            "summary": str(data.get("summary", "")).strip() or "",
             "sender_role": str(data.get("sender_role", "Unknown")).strip() or "Unknown",
             "named_entities": [str(item) for item in data.get("named_entities", [])][:30],
             "time_expressions": [str(item) for item in data.get("time_expressions", [])][:20],

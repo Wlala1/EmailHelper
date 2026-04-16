@@ -327,3 +327,65 @@ def get_unaccepted_high_priority_candidates(
         if len(result) >= limit:
             break
     return result
+
+
+def list_pending_schedule_candidates(
+    session: Session,
+    user_id: str,
+    *,
+    lookback_days: int = 30,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Return pending schedule candidates enriched with email context and classifier summary.
+
+    Excludes candidates that already have terminal feedback (accepted/rejected).
+    Ordered by confidence descending.
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+
+    terminal_feedback_target_ids = {
+        row[0]
+        for row in session.execute(
+            select(UserFeedbackEvent.target_id).where(
+                UserFeedbackEvent.user_id == user_id,
+                UserFeedbackEvent.target_type == "schedule_candidate",
+                UserFeedbackEvent.feedback_signal.in_(("accepted", "rejected")),
+                UserFeedbackEvent.created_at_utc >= cutoff,
+            )
+        ).all()
+    }
+
+    candidates = session.scalars(
+        select(ScheduleCandidate)
+        .where(
+            ScheduleCandidate.user_id == user_id,
+            ScheduleCandidate.is_current.is_(True),
+            ScheduleCandidate.action == "suggest_only",
+            ScheduleCandidate.write_status == "pending",
+            ScheduleCandidate.created_at_utc >= cutoff,
+        )
+        .order_by(ScheduleCandidate.confidence.desc(), ScheduleCandidate.created_at_utc.desc())
+        .limit(limit * 3)
+    ).all()
+
+    result = []
+    for candidate in candidates:
+        if candidate.candidate_id in terminal_feedback_target_ids:
+            continue
+
+        email = session.get(Email, candidate.email_id)
+        classifier = get_current_classifier(session, candidate.email_id)
+
+        result.append(
+            {
+                "candidate": candidate,
+                "email": email,
+                "classifier": classifier,
+            }
+        )
+        if len(result) >= limit:
+            break
+
+    return result

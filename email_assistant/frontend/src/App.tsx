@@ -1,25 +1,28 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   CategorySuggestion,
   PendingReviewItem,
   ReplyReviewStatus,
+  ScheduleCandidate,
   UserDashboard,
   UserStatus,
   decideTagSuggestion,
   getDashboard,
   getMicrosoftAuthUrl,
   getReplyReviewStatus,
+  getScheduleCandidates,
   getTagSuggestions,
   getUserStatus,
   refreshTagSuggestions,
   retryBootstrap,
   submitReplyReview,
+  submitScheduleReview,
 } from "./api";
 import RelationshipGraph from "./RelationshipGraph";
 
 type AppState = "login" | "bootstrapping" | "dashboard";
-type ViewKey = "overview" | "review" | "tags" | "insights";
+type ViewKey = "overview" | "review" | "tags" | "schedule" | "insights";
 
 const USER_ID_KEY = "ouma-user-id";
 
@@ -107,6 +110,8 @@ function App() {
   const [reviewStatus, setReviewStatus] = useState<ReplyReviewStatus | null>(null);
   const [selectedTone, setSelectedTone] = useState("professional");
   const [editedBody, setEditedBody] = useState("");
+  const [scheduleCandidates, setScheduleCandidates] = useState<ScheduleCandidate[]>([]);
+  const [selectedCandidate, setSelectedCandidate] = useState<ScheduleCandidate | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -234,6 +239,28 @@ function App() {
     return () => { cancelled = true; };
   }, [selectedReviewItem?.email_id]);
 
+  // ── Load schedule candidates when switching to schedule view ──────────────
+
+  useEffect(() => {
+    if (view !== "schedule" || !activeUserId) return;
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const result = await getScheduleCandidates(activeUserId);
+        if (cancelled) return;
+        setScheduleCandidates(result.candidates);
+        setSelectedCandidate(result.candidates[0] ?? null);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load schedule candidates");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [view, activeUserId]);
+
   // ── Actions ────────────────────────────────────────────────────────────────
 
   async function handleMicrosoftLogin() {
@@ -255,7 +282,25 @@ function App() {
     setUserStatus(null);
     setDashboard(null);
     setSuggestions([]);
+    setScheduleCandidates([]);
+    setSelectedCandidate(null);
     setAppState("login");
+  }
+
+  async function handleScheduleReview(candidateId: string, action: "accept" | "reject" | "defer") {
+    setLoading(true);
+    setError("");
+    try {
+      await submitScheduleReview(candidateId, action);
+      setMessage(`Schedule candidate ${action}ed.`);
+      const result = await getScheduleCandidates(activeUserId);
+      setScheduleCandidates(result.candidates);
+      setSelectedCandidate(result.candidates[0] ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to submit schedule review");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleRefreshSuggestions() {
@@ -371,16 +416,29 @@ function App() {
       </header>
 
       <nav className="nav-tabs">
-        {(["overview", "review", "tags", "insights"] as ViewKey[]).map((key) => (
-          <button
-            key={key}
-            type="button"
-            className={view === key ? "active" : ""}
-            onClick={() => setView(key)}
-          >
-            {key === "overview" ? "Overview" : key === "review" ? "Review Queue" : key === "tags" ? "Tag Suggestions" : "Insights"}
-          </button>
-        ))}
+        {(["overview", "review", "tags", "schedule", "insights"] as ViewKey[]).map((key) => {
+          const label =
+            key === "overview" ? "Overview"
+            : key === "review" ? "Review Queue"
+            : key === "tags" ? "Tag Suggestions"
+            : key === "schedule" ? "Schedule"
+            : "Insights";
+          const badge =
+            key === "schedule" && (dashboard?.schedule_overview.proactive_candidate_count ?? 0) > 0
+              ? dashboard!.schedule_overview.proactive_candidate_count
+              : null;
+          return (
+            <button
+              key={key}
+              type="button"
+              className={view === key ? "active" : ""}
+              onClick={() => setView(key)}
+            >
+              {label}
+              {badge !== null ? <span className="nav-badge">{badge}</span> : null}
+            </button>
+          );
+        })}
       </nav>
 
       <main className="content-grid">
@@ -567,6 +625,143 @@ function App() {
                     </div>
                   </article>
                 ))
+              )}
+            </div>
+          </section>
+        ) : null}
+
+        {view === "schedule" ? (
+          <section className="panel split-panel">
+            <div className="queue-column">
+              <div className="section-heading">
+                <h2>Schedule Candidates</h2>
+                <p>Low-confidence suggestions not yet added to calendar. Accept to create the event in Outlook.</p>
+              </div>
+              {scheduleCandidates.length === 0 ? (
+                <div className="empty-state">No pending schedule candidates.</div>
+              ) : (
+                scheduleCandidates.map((c) => {
+                  const confidencePct = Math.round(c.confidence * 100);
+                  const badgeClass =
+                    c.confidence >= 0.8 ? "badge badge-high"
+                    : c.confidence >= 0.6 ? "badge badge-medium"
+                    : "badge badge-low";
+                  return (
+                    <button
+                      key={c.candidate_id}
+                      type="button"
+                      className={`queue-item ${selectedCandidate?.candidate_id === c.candidate_id ? "selected" : ""}`}
+                      onClick={() => setSelectedCandidate(c)}
+                    >
+                      <div className="review-item-header">
+                        <strong>{c.title}</strong>
+                        <span className={badgeClass}>{confidencePct}%</span>
+                      </div>
+                      <span>{c.email_sender_name ?? c.email_sender_email ?? "Unknown sender"}</span>
+                      <small>{new Date(c.start_time_utc).toLocaleString()} · {c.action === "suggest_only" ? "Suggestion" : "Tentative"}</small>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="detail-column">
+              {selectedCandidate ? (
+                <>
+                  <div className="email-context-panel">
+                    <div className="email-context-meta">
+                      <span className="email-context-sender">
+                        {selectedCandidate.email_sender_name ?? selectedCandidate.email_sender_email ?? "Unknown sender"}
+                        {selectedCandidate.email_sender_name && selectedCandidate.email_sender_email
+                          ? <span className="email-context-addr"> &lt;{selectedCandidate.email_sender_email}&gt;</span>
+                          : null}
+                      </span>
+                      <span className="email-context-date">{formatDate(selectedCandidate.email_received_at_utc)}</span>
+                    </div>
+                    <h3 className="email-context-subject">{selectedCandidate.email_subject ?? "(No Subject)"}</h3>
+                  </div>
+
+                  {selectedCandidate.classifier_summary ? (
+                    <div className="email-summary-block">
+                      <p className="muted-label">Summary</p>
+                      <p>{selectedCandidate.classifier_summary}</p>
+                    </div>
+                  ) : null}
+
+                  <div className="event-details-grid">
+                    <h3>{selectedCandidate.title}</h3>
+                    <div className="list-row">
+                      <span>Start</span>
+                      <strong>{new Date(selectedCandidate.start_time_utc).toLocaleString()}</strong>
+                    </div>
+                    <div className="list-row">
+                      <span>End</span>
+                      <strong>{new Date(selectedCandidate.end_time_utc).toLocaleString()}</strong>
+                    </div>
+                    <div className="list-row">
+                      <span>Timezone</span>
+                      <strong>{selectedCandidate.source_timezone}</strong>
+                    </div>
+                    {selectedCandidate.location ? (
+                      <div className="list-row">
+                        <span>Location</span>
+                        <strong>{selectedCandidate.location}</strong>
+                      </div>
+                    ) : null}
+                    <div className="list-row">
+                      <span>Confidence</span>
+                      <strong>{Math.round(selectedCandidate.confidence * 100)}%</strong>
+                    </div>
+                    {selectedCandidate.conflict_score > 0 ? (
+                      <div className="list-row">
+                        <span>Conflict</span>
+                        <strong className="badge badge-low">
+                          {selectedCandidate.conflict_score === 1 ? "Full conflict" : "Partial conflict"}
+                        </strong>
+                      </div>
+                    ) : null}
+                    <div className="list-row">
+                      <span>Status</span>
+                      <strong>{selectedCandidate.write_status}</strong>
+                    </div>
+                    {selectedCandidate.outlook_weblink ? (
+                      <div className="list-row">
+                        <span>Outlook</span>
+                        <a href={selectedCandidate.outlook_weblink} target="_blank" rel="noreferrer">
+                          View in Outlook
+                        </a>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => void handleScheduleReview(selectedCandidate.candidate_id, "accept")}
+                    >
+                      Add to Calendar
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={loading}
+                      onClick={() => void handleScheduleReview(selectedCandidate.candidate_id, "defer")}
+                    >
+                      Defer
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      disabled={loading}
+                      onClick={() => void handleScheduleReview(selectedCandidate.candidate_id, "reject")}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="empty-state">Select a candidate to review.</div>
               )}
             </div>
           </section>

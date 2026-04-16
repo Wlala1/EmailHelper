@@ -108,6 +108,30 @@ export type ReplyReviewResult = {
   preference_vector: Record<string, unknown>;
 };
 
+export type ScheduleCandidate = {
+  candidate_id: string;
+  email_id: string;
+  title: string;
+  start_time_utc: string;
+  end_time_utc: string;
+  source_timezone: string;
+  is_all_day: boolean;
+  location?: string | null;
+  confidence: number;
+  conflict_score: number;
+  action: string;
+  write_status: string;
+  outlook_event_id?: string | null;
+  outlook_weblink?: string | null;
+  email_subject?: string | null;
+  email_sender_name?: string | null;
+  email_sender_email?: string | null;
+  email_received_at_utc?: string | null;
+  classifier_summary?: string | null;
+  classifier_category?: string | null;
+  classifier_urgency_score?: number | null;
+};
+
 export type UserStatus = {
   user_id: string;
   primary_email?: string | null;
@@ -182,6 +206,26 @@ export function refreshTagSuggestions(userId: string, sampleSize = 50, processLi
     method: "POST",
     body: JSON.stringify({ sample_size: sampleSize, process_limit: processLimit }),
   });
+}
+
+export function getScheduleCandidates(userId: string) {
+  return request<{ user_id: string; candidates: ScheduleCandidate[] }>(
+    `/v2/agents/schedule/candidates/${userId}`,
+  );
+}
+
+export function submitScheduleReview(candidateId: string, action: "accept" | "reject" | "defer") {
+  return request<{
+    candidate_id: string;
+    action: string;
+    feedback_signal: string;
+    write_status: string | null;
+    outlook_event_id: string | null;
+    outlook_weblink: string | null;
+  }>(
+    `/v2/agents/schedule/candidates/${candidateId}/review`,
+    { method: "POST", body: JSON.stringify({ action }) },
+  );
 }
 
 export function getReplyReviewStatus(emailId: string) {

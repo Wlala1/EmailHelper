@@ -404,6 +404,56 @@ class ReplyReviewResultResponse(BaseModel):
     preference_vector: dict[str, Any] = Field(default_factory=dict)
 
 
+class ScheduleReviewAction(str, Enum):
+    accept = "accept"
+    reject = "reject"
+    defer = "defer"
+
+
+class ScheduleReviewCandidateItem(BaseModel):
+    candidate_id: str
+    email_id: str
+    title: str
+    start_time_utc: datetime
+    end_time_utc: datetime
+    source_timezone: str
+    is_all_day: bool = False
+    location: Optional[str] = None
+    confidence: float
+    conflict_score: float
+    action: str
+    write_status: str
+    outlook_event_id: Optional[str] = None
+    outlook_weblink: Optional[str] = None
+    # Email context
+    email_subject: Optional[str] = None
+    email_sender_name: Optional[str] = None
+    email_sender_email: Optional[str] = None
+    email_received_at_utc: Optional[datetime] = None
+    # Classifier summary
+    classifier_summary: Optional[str] = None
+    classifier_category: Optional[str] = None
+    classifier_urgency_score: Optional[float] = None
+
+
+class ScheduleReviewCandidateListResponse(BaseModel):
+    user_id: str
+    candidates: list[ScheduleReviewCandidateItem] = Field(default_factory=list)
+
+
+class ScheduleReviewRequest(BaseModel):
+    action: ScheduleReviewAction
+
+
+class ScheduleReviewResponse(BaseModel):
+    candidate_id: str
+    action: ScheduleReviewAction
+    feedback_signal: str
+    write_status: Optional[str] = None
+    outlook_event_id: Optional[str] = None
+    outlook_weblink: Optional[str] = None
+
+
 class FeedbackEventRequest(BaseModel):
     """Request body for submitting a user feedback signal on an agent suggestion."""
 
