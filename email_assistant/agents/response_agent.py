@@ -5,7 +5,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from openai import OpenAI
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from config import MAX_RESPONSE_CONTEXT_CHARS, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
@@ -22,7 +24,24 @@ from services.neo4j_service import get_person_context
 
 logger = logging.getLogger(__name__)
 
-_client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL) if OPENAI_API_KEY else None
+
+class ResponseOutput(BaseModel):
+    reply_required: bool = Field(default=False)
+    decision_reason: str = Field(default="")
+    tone_templates: dict[str, str] = Field(default_factory=dict)
+
+
+def _make_response_llm() -> Optional[ChatOpenAI]:
+    if not OPENAI_API_KEY:
+        return None
+    kwargs: dict[str, Any] = dict(api_key=OPENAI_API_KEY, model=OPENAI_MODEL, temperature=0.4)
+    if OPENAI_BASE_URL:
+        kwargs["base_url"] = OPENAI_BASE_URL
+    return ChatOpenAI(**kwargs)
+
+
+_response_llm = _make_response_llm()
+_response_chain = _response_llm.with_structured_output(ResponseOutput) if _response_llm else None
 
 SYSTEM_PROMPT = """You are OUMA Response Agent.
 Given classifier result, attachment status, relationship snapshot, top schedule candidate,
@@ -236,7 +255,7 @@ def _llm_response(
     shared_org_members: Optional[list[str]] = None,
     shared_events: Optional[list[str]] = None,
 ) -> Optional[dict[str, Any]]:
-    if _client is None:
+    if _response_chain is None:
         return None
     try:
         user_payload = {
@@ -249,23 +268,21 @@ def _llm_response(
             "shared_org_members": shared_org_members or [],
             "shared_events_count": len(shared_events or []),
         }
-        response = _client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)[:MAX_RESPONSE_CONTEXT_CHARS]},
-            ],
-            temperature=0.4,
-            response_format={"type": "json_object"},
-        )
-        data = json.loads(response.choices[0].message.content)
-        if "tone_templates" not in data or not isinstance(data["tone_templates"], dict):
-            return None
-        data["reply_required"] = bool(data.get("reply_required", False))
-        data["decision_reason"] = str(data.get("decision_reason", ""))
+        messages = [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(
+                content=json.dumps(user_payload, ensure_ascii=False)[:MAX_RESPONSE_CONTEXT_CHARS]
+            ),
+        ]
+        data: ResponseOutput = _response_chain.invoke(messages)
+        tone_templates = data.tone_templates
         for k in ("professional", "casual", "colloquial"):
-            data["tone_templates"].setdefault(k, "")
-        return data
+            tone_templates.setdefault(k, "")
+        return {
+            "reply_required": data.reply_required,
+            "decision_reason": data.decision_reason,
+            "tone_templates": tone_templates,
+        }
     except Exception:
         return None
 

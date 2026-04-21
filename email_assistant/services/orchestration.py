@@ -427,19 +427,13 @@ def process_live_inbox_email(
     email_id: str,
     user_id: str,
 ) -> dict[str, Any]:
-    classifier_output = execute_classifier(session_factory, trace_id=trace_id, email_id=email_id, user_id=user_id)
-    relationship_output = execute_relationship_graph(session_factory, trace_id=trace_id, email_id=email_id, user_id=user_id)
-    schedule_output = execute_schedule(session_factory, trace_id=trace_id, email_id=email_id, user_id=user_id)
-    response_output = execute_response(session_factory, trace_id=trace_id, email_id=email_id, user_id=user_id)
-    draft_output = maybe_create_reply_draft(session_factory, user_id=user_id, email_id=email_id)
-    response_output["draft_write"] = draft_output
-    return {
-        "classifier": classifier_output,
-        "relationship_graph": relationship_output,
-        "schedule": schedule_output,
-        "response": response_output,
-        "draft_write": draft_output,
-    }
+    from services.langgraph_pipeline import process_live_inbox_email_graph
+    return process_live_inbox_email_graph(
+        session_factory,
+        trace_id=trace_id,
+        email_id=email_id,
+        user_id=user_id,
+    )
 
 
 def process_historical_inbox_email(
@@ -449,9 +443,10 @@ def process_historical_inbox_email(
     email_id: str,
     user_id: str,
 ) -> dict[str, Any]:
-    classifier_output = execute_classifier(session_factory, trace_id=trace_id, email_id=email_id, user_id=user_id)
-    relationship_output = execute_relationship_graph(session_factory, trace_id=trace_id, email_id=email_id, user_id=user_id)
-    return {
-        "classifier": classifier_output,
-        "relationship_graph": relationship_output,
-    }
+    from services.langgraph_pipeline import process_historical_inbox_email_graph
+    return process_historical_inbox_email_graph(
+        session_factory,
+        trace_id=trace_id,
+        email_id=email_id,
+        user_id=user_id,
+    )

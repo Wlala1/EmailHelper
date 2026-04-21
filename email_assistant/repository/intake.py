@@ -22,6 +22,17 @@ def upsert_user(session: Session, user: UserPayload) -> User:
             last_login_at_utc=utcnow(),
         )
         session.add(existing)
+        try:
+            session.flush()
+        except IntegrityError:
+            session.rollback()
+            existing = session.get(User, user.user_id)
+            if existing is None:
+                raise
+            existing.primary_email = user.primary_email or existing.primary_email
+            existing.display_name = user.display_name or existing.display_name
+            existing.timezone = user.timezone or existing.timezone
+            existing.last_login_at_utc = utcnow()
     else:
         existing.primary_email = user.primary_email or existing.primary_email
         existing.display_name = user.display_name or existing.display_name

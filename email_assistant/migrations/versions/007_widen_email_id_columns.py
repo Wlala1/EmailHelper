@@ -6,6 +6,7 @@ Create Date: 2026-04-06
 """
 from __future__ import annotations
 
+import sqlalchemy as sa
 from alembic import op
 
 revision = "007"
@@ -13,7 +14,6 @@ down_revision = "006"
 branch_labels = None
 depends_on = None
 
-# Tables and columns to widen: (table, column)
 _EMAIL_ID_COLS = [
     ("emails", "email_id"),
     ("email_recipients", "email_id"),
@@ -32,10 +32,17 @@ _EMAIL_ID_COLS = [
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        # SQLite does not enforce VARCHAR length; skip the no-op ALTER.
+        return
     for table, column in _EMAIL_ID_COLS:
         op.execute(f"ALTER TABLE {table} ALTER COLUMN {column} TYPE VARCHAR(255)")
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        return
     for table, column in reversed(_EMAIL_ID_COLS):
         op.execute(f"ALTER TABLE {table} ALTER COLUMN {column} TYPE VARCHAR(64)")

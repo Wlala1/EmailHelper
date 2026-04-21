@@ -16,34 +16,36 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.alter_column(
-        "attachments",
-        "attachment_id",
-        existing_type=sa.String(64),
-        type_=sa.String(512),
-        existing_nullable=False,
-    )
-    op.alter_column(
-        "attachment_results",
-        "attachment_id",
-        existing_type=sa.String(64),
-        type_=sa.String(512),
-        existing_nullable=False,
-    )
+    # SQLite does not enforce VARCHAR length and does not support ALTER COLUMN.
+    # batch_alter_table uses a copy-and-move strategy that works on both dialects.
+    with op.batch_alter_table("attachments") as batch_op:
+        batch_op.alter_column(
+            "attachment_id",
+            existing_type=sa.String(64),
+            type_=sa.String(512),
+            existing_nullable=False,
+        )
+    with op.batch_alter_table("attachment_results") as batch_op:
+        batch_op.alter_column(
+            "attachment_id",
+            existing_type=sa.String(64),
+            type_=sa.String(512),
+            existing_nullable=False,
+        )
 
 
 def downgrade() -> None:
-    op.alter_column(
-        "attachment_results",
-        "attachment_id",
-        existing_type=sa.String(512),
-        type_=sa.String(64),
-        existing_nullable=False,
-    )
-    op.alter_column(
-        "attachments",
-        "attachment_id",
-        existing_type=sa.String(512),
-        type_=sa.String(64),
-        existing_nullable=False,
-    )
+    with op.batch_alter_table("attachment_results") as batch_op:
+        batch_op.alter_column(
+            "attachment_id",
+            existing_type=sa.String(512),
+            type_=sa.String(64),
+            existing_nullable=False,
+        )
+    with op.batch_alter_table("attachments") as batch_op:
+        batch_op.alter_column(
+            "attachment_id",
+            existing_type=sa.String(512),
+            type_=sa.String(64),
+            existing_nullable=False,
+        )

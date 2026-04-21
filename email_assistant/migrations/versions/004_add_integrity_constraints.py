@@ -52,19 +52,20 @@ def upgrade() -> None:
         )
 
     # ── Fix 3: unique constraint on (user_id, category_name) ─────────────────
-    op.create_unique_constraint(
-        "uq_category_definitions_user_name",
-        "category_definitions",
-        ["user_id", "category_name"],
-    )
+    # Use batch mode so this works on both SQLite (copy-and-move) and PostgreSQL.
+    with op.batch_alter_table("category_definitions") as batch_op:
+        batch_op.create_unique_constraint(
+            "uq_category_definitions_user_name",
+            ["user_id", "category_name"],
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "uq_category_definitions_user_name",
-        "category_definitions",
-        type_="unique",
-    )
+    with op.batch_alter_table("category_definitions") as batch_op:
+        batch_op.drop_constraint(
+            "uq_category_definitions_user_name",
+            type_="unique",
+        )
 
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
