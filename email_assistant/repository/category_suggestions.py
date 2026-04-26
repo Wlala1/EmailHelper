@@ -75,10 +75,13 @@ def upsert_category_suggestion(
         return existing
 
     existing.category_description = category_description
-    existing.supporting_email_ids = supporting_email_ids
-    existing.supporting_subjects = supporting_subjects
+    # Accumulate supporting emails (deduplicated, capped at 20)
+    merged_ids = list(dict.fromkeys((existing.supporting_email_ids or []) + supporting_email_ids))[:20]
+    merged_subjects = list(dict.fromkeys((existing.supporting_subjects or []) + supporting_subjects))[:20]
+    existing.supporting_email_ids = merged_ids
+    existing.supporting_subjects = merged_subjects
     existing.rationale_keywords = rationale_keywords
-    existing.sample_size = sample_size
+    existing.sample_size = len(merged_ids)
     existing.process_limit = process_limit
     existing.created_from_email_id = created_from_email_id
     existing.status = "pending"

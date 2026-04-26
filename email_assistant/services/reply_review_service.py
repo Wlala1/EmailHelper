@@ -83,6 +83,8 @@ def get_reply_review_status(session: Session, *, email_id: str) -> dict[str, Any
         "email_sender_name": email.sender_name,
         "email_sender_email": email.sender_email,
         "email_body_preview": email.body_preview,
+        "email_body_content": email.body_content,
+        "email_body_content_type": email.body_content_type,
     }
 
 

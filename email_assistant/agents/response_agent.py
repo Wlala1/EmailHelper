@@ -4,15 +4,18 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
+from typing_extensions import TypedDict
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from config import MAX_RESPONSE_CONTEXT_CHARS, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
 from models import ReplySuggestion
 from repositories import (
+    get_conversation_thread,
     get_current_classifier,
     get_current_top_schedule_candidate,
     get_email,
@@ -25,10 +28,35 @@ from services.neo4j_service import get_person_context
 logger = logging.getLogger(__name__)
 
 
-class ResponseOutput(BaseModel):
+class DecisionOutput(BaseModel):
     reply_required: bool = Field(default=False)
     decision_reason: str = Field(default="")
+
+
+class ResponseOutput(BaseModel):
     tone_templates: dict[str, str] = Field(default_factory=dict)
+
+
+class ReviewState(TypedDict):
+    # Immutable context — email + enrichment signals
+    subject: str
+    body_preview: str
+    category: str
+    summary: str
+    attachment_status: str
+    relationship_snapshot: dict
+    top_schedule_candidate: Optional[dict]
+    writing_profile: dict
+    identity_tier: int
+    shared_org_members: list
+    shared_events: list
+    conversation_context: str
+    sender_name: str
+    sender_email: str
+    # Mutable
+    reply_required: bool
+    decision_reason: str
+    draft: Optional[dict]
 
 
 def _make_response_llm() -> Optional[ChatOpenAI]:
@@ -41,23 +69,43 @@ def _make_response_llm() -> Optional[ChatOpenAI]:
 
 
 _response_llm = _make_response_llm()
-_response_chain = _response_llm.with_structured_output(ResponseOutput) if _response_llm else None
+_decision_chain = _response_llm.with_structured_output(DecisionOutput, method="function_calling") if _response_llm else None
+_draft_llm = _response_llm  # raw LLM — draft node parses JSON manually
 
-SYSTEM_PROMPT = """You are OUMA Response Agent.
-Given classifier result, attachment status, relationship snapshot, top schedule candidate,
-the user's historical writing profile, and the sender's identity tier (1=authority/professor,
-2=professional/external, 3=peer/teammate), decide whether a reply is required and produce
-three tone templates.
+DECISION_PROMPT = """You are a reply-necessity evaluator for an email assistant.
+Read the email context and decide whether a reply from the user is genuinely needed.
 
-Identity tier guidance:
-  Tier 1 (professor/advisor/director): always reply_required=true, use professional tone.
-  Tier 2 (recruiter/manager/client): reply if relationship is warm or meeting involved.
-  Tier 3 (teammate/peer/student): reply if action required or relationship strong.
+Guidelines:
+- Reply IS needed when: a real person asks a question, requests an action, invites attendance,
+  shares something that warrants acknowledgment, or is following up on a prior conversation.
+- Reply is NOT needed when: the email is an automated notification, newsletter, mass announcement,
+  system alert, promotional offer, event broadcast, or any message where no personal response
+  is expected.
+- Ignore identity tier rules — base your decision purely on what the email actually says
+  and whether a human response makes sense.
 
 Return JSON only:
 {
   "reply_required": true/false,
-  "decision_reason": "...",
+  "decision_reason": "one concise sentence explaining why"
+}
+"""
+
+DRAFT_PROMPT = """You are OUMA Response Agent.
+Given the email context, produce three tone variants of a reply.
+The reply has already been determined to be necessary — your job is only to draft it well.
+
+Use the writing profile (greeting/closing patterns, preferred language, tone) to match
+the user's natural style. Use conversation history to reference prior context naturally
+and avoid repeating what has already been discussed.
+
+Identity tier guidance for tone:
+  Tier 1 (professor/advisor/director): formal and deferential.
+  Tier 2 (recruiter/manager/client): professional and courteous.
+  Tier 3 (teammate/peer/student): can be casual or colloquial.
+
+Return JSON only:
+{
   "tone_templates": {
     "professional": "...",
     "casual": "...",
@@ -77,6 +125,8 @@ IDENTITY_TIER_MAP: dict[str, int] = {
     # Tier 3 — peer / internal (default)
     "teammate": 3, "colleague": 3, "intern": 3, "student": 3, "recipient": 3,
     "peer": 3, "classmate": 3, "ta": 3, "assistant": 3,
+    # Tier 0 — automated / broadcast (never reply)
+    "system": 0, "broadcast": 0, "newsletter": 0, "noreply": 0, "no-reply": 0,
 }
 
 
@@ -89,6 +139,51 @@ def _sender_tier(person_role: Optional[str]) -> int:
         if keyword in role_lower:
             return tier
     return 3
+
+
+def _retrieve_conversation_context(
+    session: Session,
+    email: Any,
+    *,
+    max_emails: int = 5,
+    max_chars_per_email: int = 400,
+) -> str:
+    """Retrieve and format prior emails in the same conversation thread.
+
+    Uses conversation_id (Microsoft Graph thread ID) so only emails from
+    the exact same reply chain are returned — not arbitrary emails from
+    the same sender. Returns an empty string when no thread history exists.
+    """
+    if not email or not email.conversation_id:
+        return ""
+
+    thread_emails = get_conversation_thread(
+        session,
+        conversation_id=email.conversation_id,
+        exclude_email_id=email.email_id,
+        limit=max_emails,
+    )
+    if not thread_emails:
+        return ""
+
+    parts: list[str] = []
+    for e in thread_emails:
+        date_str = (
+            e.received_at_utc.strftime("%Y-%m-%d %H:%M UTC")
+            if e.received_at_utc else "unknown date"
+        )
+        # Use direction to label who sent this message.
+        speaker = "You" if e.direction == "outbound" else (e.sender_name or e.sender_email or "Sender")
+        # Prefer body_preview (already plain-text); fall back to body_content truncated.
+        body = (e.body_preview or e.body_content or "").strip()
+        body = body[:max_chars_per_email]
+        parts.append(
+            f"[{date_str} · {speaker}]\n"
+            f"Subject: {e.subject or '(no subject)'}\n"
+            f"{body}"
+        )
+
+    return "--- Conversation History (same thread) ---\n\n" + "\n\n".join(parts)
 
 
 def _profile_to_dict(profile: Any) -> dict[str, Any]:
@@ -243,48 +338,170 @@ def _heuristic_response(
     }
 
 
-def _llm_response(
+def _decision_node(state: ReviewState) -> dict:
+    """LangGraph node: decide whether a reply is needed based on email content."""
+    if _decision_chain is None:
+        # Heuristic fallback
+        rel = state["relationship_snapshot"] or {}
+        tier = state["identity_tier"]
+        rw = float(rel.get("relationship_weight", 0.5))
+        reply = tier == 1 or rw >= 0.7
+        return {
+            "reply_required": reply,
+            "decision_reason": "Heuristic: tier/relationship weight decision.",
+        }
+    try:
+        payload = {
+            "subject": state["subject"],
+            "body_preview": state["body_preview"],
+            "category": state["category"],
+            "summary": state["summary"],
+            "sender_name": state["sender_name"],
+            "sender_email": state["sender_email"],
+            "identity_tier": state["identity_tier"],
+            "relationship_weight": (state["relationship_snapshot"] or {}).get("relationship_weight"),
+            "shared_events_count": len(state["shared_events"]),
+            "conversation_history": state["conversation_context"] or "(no prior thread history)",
+        }
+        messages = [
+            SystemMessage(content=DECISION_PROMPT),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)[:MAX_RESPONSE_CONTEXT_CHARS]),
+        ]
+        result: DecisionOutput = _decision_chain.invoke(messages)
+        tier = state.get("identity_tier", 3)
+        reply_required = result.reply_required or (tier == 1)
+        decision_reason = result.decision_reason if reply_required == result.reply_required else "发件人为高权重联系人（教授/导师/主管），建议正式回复。"
+        return {"reply_required": reply_required, "decision_reason": decision_reason}
+    except Exception as exc:
+        logger.warning("Decision node failed, defaulting to no reply: %s", exc)
+        tier = state.get("identity_tier", 3)
+        return {
+            "reply_required": tier == 1,
+            "decision_reason": "Decision LLM unavailable." if tier != 1 else "发件人为高权重联系人（教授/导师/主管），建议正式回复。",
+        }
+
+
+def _draft_node(state: ReviewState) -> dict:
+    """LangGraph node: generate tone templates (only runs when reply is needed)."""
+    if _draft_llm is None:
+        draft = _heuristic_response(
+            category=state["category"],
+            summary=state["summary"],
+            attachment_status=state["attachment_status"],
+            relationship_snapshot=state["relationship_snapshot"],
+            top_schedule_candidate=state["top_schedule_candidate"],
+            writing_profile=state["writing_profile"],
+            identity_tier=state["identity_tier"],
+            shared_events=state["shared_events"],
+        )
+        return {"draft": draft}
+
+    try:
+        payload: dict[str, Any] = {
+            "subject": state["subject"],
+            "body_preview": state["body_preview"],
+            "classifier": {"category": state["category"], "summary": state["summary"]},
+            "attachment_status": state["attachment_status"],
+            "relationship_snapshot": state["relationship_snapshot"] or {},
+            "top_schedule_candidate": state["top_schedule_candidate"] or {},
+            "writing_profile": state["writing_profile"] or {},
+            "identity_tier": state["identity_tier"],
+            "shared_org_members": state["shared_org_members"],
+            "shared_events_count": len(state["shared_events"]),
+            "conversation_history": state["conversation_context"] or "(no prior thread history)",
+        }
+        messages = [
+            SystemMessage(content=DRAFT_PROMPT),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)[:MAX_RESPONSE_CONTEXT_CHARS]),
+        ]
+        raw = _draft_llm.invoke(messages)
+        content = raw.content if hasattr(raw, "content") else str(raw)
+        # Strip markdown fences if present
+        content = content.strip()
+        if content.startswith("```"):
+            content = content.split("```", 2)[1]
+            if content.startswith("json"):
+                content = content[4:]
+            content = content.rsplit("```", 1)[0].strip()
+        parsed = json.loads(content)
+        tone_templates: dict[str, str] = parsed.get("tone_templates", {})
+        for k in ("professional", "casual", "colloquial"):
+            tone_templates.setdefault(k, "")
+        return {"draft": {"tone_templates": tone_templates}}
+    except Exception:
+        draft = _heuristic_response(
+            category=state["category"],
+            summary=state["summary"],
+            attachment_status=state["attachment_status"],
+            relationship_snapshot=state["relationship_snapshot"],
+            top_schedule_candidate=state["top_schedule_candidate"],
+            writing_profile=state["writing_profile"],
+            identity_tier=state["identity_tier"],
+            shared_events=state["shared_events"],
+        )
+        return {"draft": draft}
+
+
+def _route_after_decision(state: ReviewState) -> str:
+    return "draft" if state.get("reply_required") else "end"
+
+
+def _build_review_graph() -> Any:
+    g: StateGraph = StateGraph(ReviewState)
+    g.add_node("decision", _decision_node)
+    g.add_node("draft", _draft_node)
+    g.add_edge(START, "decision")
+    g.add_conditional_edges("decision", _route_after_decision, {"draft": "draft", "end": END})
+    g.add_edge("draft", END)
+    return g.compile()
+
+
+_review_graph = _build_review_graph()
+
+
+def _run_review_loop(
     *,
+    subject: str,
+    body_preview: str,
     category: str,
     summary: str,
     attachment_status: str,
     relationship_snapshot: Optional[dict[str, Any]],
     top_schedule_candidate: Optional[dict[str, Any]],
-    writing_profile: Optional[dict[str, Any]],
-    identity_tier: int = 3,
-    shared_org_members: Optional[list[str]] = None,
-    shared_events: Optional[list[str]] = None,
-) -> Optional[dict[str, Any]]:
-    if _response_chain is None:
-        return None
-    try:
-        user_payload = {
-            "classifier": {"category": category, "summary": summary},
-            "attachment_status": attachment_status,
-            "relationship_snapshot": relationship_snapshot or {},
-            "top_schedule_candidate": top_schedule_candidate or {},
-            "writing_profile": writing_profile or {},
-            "identity_tier": identity_tier,
-            "shared_org_members": shared_org_members or [],
-            "shared_events_count": len(shared_events or []),
-        }
-        messages = [
-            SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(
-                content=json.dumps(user_payload, ensure_ascii=False)[:MAX_RESPONSE_CONTEXT_CHARS]
-            ),
-        ]
-        data: ResponseOutput = _response_chain.invoke(messages)
-        tone_templates = data.tone_templates
-        for k in ("professional", "casual", "colloquial"):
-            tone_templates.setdefault(k, "")
-        return {
-            "reply_required": data.reply_required,
-            "decision_reason": data.decision_reason,
-            "tone_templates": tone_templates,
-        }
-    except Exception:
-        return None
+    writing_profile: dict[str, Any],
+    identity_tier: int,
+    shared_org_members: list[str],
+    shared_events: list[str],
+    conversation_context: str,
+    sender_name: str,
+    sender_email: str,
+) -> dict[str, Any]:
+    """Run decision → (if needed) draft and return final state."""
+    initial: ReviewState = {
+        "subject": subject,
+        "body_preview": body_preview,
+        "category": category,
+        "summary": summary,
+        "attachment_status": attachment_status,
+        "relationship_snapshot": relationship_snapshot or {},
+        "top_schedule_candidate": top_schedule_candidate,
+        "writing_profile": writing_profile,
+        "identity_tier": identity_tier,
+        "shared_org_members": shared_org_members,
+        "shared_events": shared_events,
+        "conversation_context": conversation_context,
+        "sender_name": sender_name,
+        "sender_email": sender_email,
+        "reply_required": False,
+        "decision_reason": "",
+        "draft": None,
+    }
+    final: ReviewState = _review_graph.invoke(initial)
+    return {
+        "reply_required": final["reply_required"],
+        "decision_reason": final["decision_reason"],
+        "tone_templates": (final["draft"] or {}).get("tone_templates", {}),
+    }
 
 
 def run_response(
@@ -302,6 +519,36 @@ def run_response(
 
     email = get_email(session, email_id)
     sender_email = email.sender_email if email else None
+
+    # Short-circuit for bulk/broadcast senders — no reply needed.
+    from services.orchestration import BULK_SENDER_RE
+    if BULK_SENDER_RE.search(sender_email or ""):
+        output = _heuristic_response(
+            category=classifier.category,
+            summary=classifier.summary,
+            attachment_status=attachment_status,
+            relationship_snapshot=None,
+            top_schedule_candidate=None,
+            writing_profile={},
+            identity_tier=3,
+        )
+        output["reply_required"] = False
+        output["decision_reason"] = "Bulk or broadcast sender — no reply required."
+        set_non_current_reply(session, email_id)
+        session.add(ReplySuggestion(
+            run_id=run_id,
+            trace_id=trace_id,
+            email_id=email_id,
+            user_id=user_id,
+            reply_required=False,
+            decision_reason=output["decision_reason"],
+            tone_templates=output["tone_templates"],
+            is_current=True,
+        ))
+        return {**output, "identity_tier": 3, "preferred_tone_key": "professional",
+                "shared_org_members": [], "shared_events": [], "relationship_snapshot": None,
+                "top_schedule_candidate": None, "writing_profile": {},
+                "produced_at_utc": datetime.now(timezone.utc).isoformat()}
     relationship_snapshot: Optional[dict[str, Any]] = None
     shared_org_members: list[str] = []
     shared_events: list[str] = []
@@ -329,6 +576,22 @@ def run_response(
     person_role = (relationship_snapshot or {}).get("sender_role") or (relationship_snapshot or {}).get("person_role")
     identity_tier = _sender_tier(person_role)
 
+    # Tier 0 = system/broadcast sender — short-circuit, no reply needed.
+    if identity_tier == 0:
+        reason = "Automated or broadcast sender — no reply required."
+        set_non_current_reply(session, email_id)
+        session.add(ReplySuggestion(
+            run_id=run_id, trace_id=trace_id, email_id=email_id, user_id=user_id,
+            reply_required=False, decision_reason=reason, tone_templates={}, is_current=True,
+        ))
+        return {
+            "reply_required": False, "decision_reason": reason, "tone_templates": {},
+            "identity_tier": 0, "preferred_tone_key": "professional",
+            "shared_org_members": shared_org_members, "shared_events": shared_events,
+            "relationship_snapshot": relationship_snapshot, "top_schedule_candidate": None,
+            "writing_profile": {}, "produced_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+
     top_candidate = get_current_top_schedule_candidate(session, email_id)
     writing_profile = _profile_to_dict(get_user_writing_profile(session, user_id))
     top_schedule_candidate = None
@@ -339,7 +602,18 @@ def run_response(
             "action": top_candidate.action,
         }
 
-    output = _llm_response(
+    # RAG: retrieve conversation thread history scoped to conversation_id.
+    # This ensures context comes only from the current reply chain, not any
+    # unrelated email from the same sender.
+    conversation_context = _retrieve_conversation_context(session, email)
+
+    # Draft → Critic review loop (max 2 iterations).
+    # Falls back to heuristic internally if LLM is unavailable.
+    output = _run_review_loop(
+        subject=email.subject or "",
+        body_preview=email.body_preview or "",
+        sender_name=email.sender_name or "",
+        sender_email=sender_email or "",
         category=classifier.category,
         summary=classifier.summary,
         attachment_status=attachment_status,
@@ -349,8 +623,9 @@ def run_response(
         identity_tier=identity_tier,
         shared_org_members=shared_org_members,
         shared_events=shared_events,
+        conversation_context=conversation_context,
     )
-    if output is None:
+    if not output:
         output = _heuristic_response(
             category=classifier.category,
             summary=classifier.summary,
@@ -361,10 +636,6 @@ def run_response(
             identity_tier=identity_tier,
             shared_events=shared_events,
         )
-
-    # Always force reply_required=True for Tier 1 senders, even if LLM disagrees.
-    if identity_tier == 1:
-        output["reply_required"] = True
 
     set_non_current_reply(session, email_id)
     session.add(

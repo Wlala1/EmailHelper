@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from config import BOOTSTRAP_LOOKBACK_DAYS
+from config import BOOTSTRAP_INBOX_SAMPLE_SIZE, BOOTSTRAP_LOOKBACK_DAYS
 from repositories import (
     create_sync_run,
     finalize_sync_run,
@@ -169,25 +171,76 @@ class MailboxSyncService:
         try:
             messages = graph_service.list_messages_since(access_token, folder_name=folder_name, since_utc=since_utc)
             items_seen = len(messages)
-            for message in messages:
-                attachments = graph_service.fetch_attachments(access_token, message.get("id")) if message.get("hasAttachments") else []
-                email_id, payload = build_graph_intake_payload(
-                    user_id=user_id,
-                    primary_email=primary_email,
-                    display_name=display_name,
-                    timezone_name=timezone_name,
-                    message=message,
-                    folder=folder_name,
-                    processed_mode="bootstrap",
-                    attachments=attachments,
-                )
-                trace_id = str(uuid4())
-                execute_intake(self.session_factory, trace_id=trace_id, email_id=email_id, user_id=user_id, payload=payload)
-                if processor == "historical_inbox":
-                    process_historical_inbox_email(self.session_factory, trace_id=trace_id, email_id=email_id, user_id=user_id)
-                else:
+
+            if processor == "historical_inbox" and len(messages) > BOOTSTRAP_INBOX_SAMPLE_SIZE:
+                messages = random.sample(messages, BOOTSTRAP_INBOX_SAMPLE_SIZE)
+
+            if processor == "historical_inbox":
+                # Pass 1: intake all emails, collect (trace_id, email_id) pairs
+                # Skip attachment fetching — classifier ignores attachments for bootstrap emails.
+                intake_pairs: list[tuple[str, str]] = []
+                for message in messages:
+                    email_id, payload = build_graph_intake_payload(
+                        user_id=user_id,
+                        primary_email=primary_email,
+                        display_name=display_name,
+                        timezone_name=timezone_name,
+                        message=message,
+                        folder=folder_name,
+                        processed_mode="bootstrap",
+                        attachments=[],
+                    )
+                    trace_id = str(uuid4())
+                    execute_intake(self.session_factory, trace_id=trace_id, email_id=email_id, user_id=user_id, payload=payload)
+                    intake_pairs.append((trace_id, email_id))
+                    items_processed += 1
+
+                # Discovery: one batch LLM call on all stored email subjects → 5–8 broad categories
+                from services.batch_backfill_service import discover_bootstrap_categories
+                catalog = discover_bootstrap_categories(self.session_factory, user_id=user_id)
+
+                # Pass 2: classify all in parallel — each call is independent (own DB session + LLM call)
+                def _classify(pair: tuple[str, str]) -> bool:
+                    t_id, e_id = pair
+                    try:
+                        process_historical_inbox_email(
+                            self.session_factory,
+                            trace_id=t_id,
+                            email_id=e_id,
+                            user_id=user_id,
+                            category_catalog_override=catalog,
+                        )
+                        return True
+                    except Exception:
+                        return False
+
+                with ThreadPoolExecutor(max_workers=10) as pool:
+                    futures = {pool.submit(_classify, pair): pair for pair in intake_pairs}
+                    for future in as_completed(futures):
+                        if not future.result():
+                            items_failed += 1
+
+                # Batch Neo4j sync — one transaction for all bootstrap observations
+                from agents.relationship_graph_agent import batch_sync_neo4j_for_user
+                with self.session_factory() as session:
+                    batch_sync_neo4j_for_user(session, user_id=user_id)
+            else:
+                for message in messages:
+                    attachments = graph_service.fetch_attachments(access_token, message.get("id")) if message.get("hasAttachments") else []
+                    email_id, payload = build_graph_intake_payload(
+                        user_id=user_id,
+                        primary_email=primary_email,
+                        display_name=display_name,
+                        timezone_name=timezone_name,
+                        message=message,
+                        folder=folder_name,
+                        processed_mode="bootstrap",
+                        attachments=attachments,
+                    )
+                    trace_id = str(uuid4())
+                    execute_intake(self.session_factory, trace_id=trace_id, email_id=email_id, user_id=user_id, payload=payload)
                     learn_from_outbound_email(self.session_factory, email_id=email_id, user_id=user_id)
-                items_processed += 1
+                    items_processed += 1
 
             with self.session_factory() as session:
                 finalize_sync_run(

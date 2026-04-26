@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Optional
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
+from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from agents.classification.common import (
     ATTACHMENT_SUMMARY_PROMPT,
     CLASSIFIER_PROMPT,
+    CLASSIFIER_TOOL_PROMPT,
     MAX_ATTACHMENT_SUMMARY_SOURCE_CHARS,
     AttachmentContextBundle,
     normalize_category_name,
@@ -23,6 +28,8 @@ from config import (
     OPENAI_MODEL,
 )
 
+logger = logging.getLogger(__name__)
+
 
 # ── Pydantic schemas for structured output ──────────────────────────────────
 
@@ -33,7 +40,6 @@ class ClassificationOutput(BaseModel):
     is_new_category: bool = Field(default=False)
     urgency_score: float = Field(default=0.5, ge=0.0, le=1.0)
     summary: str = Field(default="")
-    sender_role: str = Field(default="Unknown")
     named_entities: list[str] = Field(default_factory=list)
     time_expressions: list[str] = Field(default_factory=list)
 
@@ -133,9 +139,8 @@ def llm_classify(
             "is_new_category": is_new_category,
             "urgency_score": float(data.urgency_score),
             "summary": data.summary.strip() or "未生成摘要",
-            "sender_role": data.sender_role.strip() or "Unknown",
-            "named_entities": [str(e) for e in data.named_entities][:30],
-            "time_expressions": [str(t) for t in data.time_expressions][:20],
+            "named_entities": [str(e) for e in data.named_entities][:10],
+            "time_expressions": [str(t) for t in data.time_expressions][:10],
         }
     except Exception:
         return None
@@ -196,4 +201,120 @@ def llm_summarize_attachment_sections(
             return None
         return bundle
     except Exception:
+        return None
+
+
+# ── Tool-calling classifier ──────────────────────────────────────────────────
+
+def _build_classifier_tools(session: Session, user_id: str, result_sink: list[dict]) -> list:
+    """Build classification tools with session/user_id bound via closure."""
+    from repositories import get_category_by_name, get_category_definitions
+
+    @tool
+    def search_categories(query: str) -> str:
+        """Search existing email categories by keyword.
+        Use 2-3 keywords from the email subject or body.
+        Returns up to 5 matching categories with their descriptions.
+        """
+        all_cats = get_category_definitions(session, user_id)
+        words = query.lower().split()
+        matched = [
+            c for c in all_cats
+            if any(
+                w in c.category_name.lower() or w in (c.category_description or "").lower()
+                for w in words
+            )
+        ]
+        # Fall back to full list (capped) if no keyword match
+        results = matched[:5] if matched else all_cats[:5]
+        return json.dumps([
+            {"category_name": c.category_name, "category_description": c.category_description}
+            for c in results
+        ])
+
+    @tool
+    def get_category_details(category_name: str) -> str:
+        """Get the full description of a specific category by exact name.
+        Use this to confirm whether a category truly fits the email before assigning it.
+        Returns the category details or an error if not found.
+        """
+        cat = get_category_by_name(session, user_id, category_name)
+        if cat is None:
+            return json.dumps({"error": f"Category '{category_name}' not found."})
+        return json.dumps({
+            "category_name": cat.category_name,
+            "category_description": cat.category_description,
+        })
+
+    @tool
+    def finalize_classification(result_json: str) -> str:
+        """Submit the final classification result. Call this ONCE as your last action.
+        result_json must be a JSON object with these fields:
+          - category_name (str): title-case, ≤ 64 chars
+          - is_new_category (bool): true only if no existing category fits
+          - category_description (str): description for new categories; empty string for existing ones
+          - urgency_score (float 0.0-1.0): 0.9+ for deadlines, 0.5 informational, 0.2 newsletters
+          - summary (str): concise 2-3 sentence Chinese summary
+          - sender_role (str): Format "Org · Role". (1) Org: always extract from the email domain suffix — strip subdomains to registrar domain ("comp.nus.edu.sg" → "nus.edu.sg"), use SLD as label ("NUS", "Google", "Microsoft"); short SLD ≤4 chars → UPPERCASE, longer → Title Case. (2) Role: look at sender display name and email body/signature first ("Prof Tan Wei", "Recruiter", "PhD Student", "Lee Jin Xing"); if none found, fall back to email local-part before @ ("john.smith" → "John Smith", "hr" → "HR", "noreply" → "System"). NEVER output "Unknown", "Recipient", or empty strings.
+          - named_entities (list[str]): people, orgs, emails found in the email (max 10)
+          - time_expressions (list[str]): dates/times in original form (max 10)
+        """
+        try:
+            data = json.loads(result_json)
+            result_sink.clear()
+            result_sink.append(data)
+            return json.dumps({"accepted": True})
+        except Exception as exc:
+            return json.dumps({"accepted": False, "error": str(exc)})
+
+    return [search_categories, get_category_details, finalize_classification]
+
+
+def llm_classify_with_tools(
+    session: Session,
+    *,
+    user_id: str,
+    combined_text: str,
+    subject: str,
+) -> Optional[dict[str, Any]]:
+    """Classify an email using tool-calling: the LLM actively searches existing
+    categories before deciding, rather than receiving a static list in the prompt.
+    Returns None on failure so the caller can fall back to llm_classify().
+    """
+    if _classify_llm is None:
+        return None
+
+    result_sink: list[dict] = []
+    tools = _build_classifier_tools(session, user_id, result_sink)
+    agent = create_react_agent(_classify_llm, tools, prompt=CLASSIFIER_TOOL_PROMPT)
+
+    user_message = (
+        f"Subject: {subject}\n\n"
+        f"Email content:\n{combined_text[:4000]}"
+    )
+    try:
+        agent.invoke({"messages": [("human", user_message)]})
+    except Exception as exc:
+        logger.warning("llm_classify_with_tools agent failed: %s", exc)
+        return None
+
+    if not result_sink:
+        logger.warning("llm_classify_with_tools: agent did not call finalize_classification")
+        return None
+
+    raw = result_sink[0]
+    try:
+        category_name = normalize_category_name(str(raw.get("category_name", "") or subject))
+        return {
+            "category_name": category_name,
+            "category_description": str(raw.get("category_description", "") or f"Emails related to {category_name}."),
+            "is_new_category": bool(raw.get("is_new_category", False)),
+            "urgency_score": float(raw.get("urgency_score", 0.5)),
+            "summary": str(raw.get("summary", "")).strip() or "未生成摘要",
+            "sender_role": str(raw.get("sender_role", "Unknown")).strip() or "Unknown",
+            "named_entities": [str(e) for e in raw.get("named_entities", [])][:10],
+            "time_expressions": [str(t) for t in raw.get("time_expressions", [])][:10],
+        }
+    except Exception as exc:
+        logger.warning("llm_classify_with_tools: failed to parse result: %s", exc)
         return None

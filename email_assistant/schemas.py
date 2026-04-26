@@ -387,6 +387,8 @@ class ReplyReviewStatusResponse(BaseModel):
     email_sender_name: Optional[str] = None
     email_sender_email: Optional[str] = None
     email_body_preview: Optional[str] = None
+    email_body_content: Optional[str] = None
+    email_body_content_type: Optional[str] = None
 
 
 class ReplyReviewResultResponse(BaseModel):
@@ -434,6 +436,10 @@ class ScheduleReviewCandidateItem(BaseModel):
     classifier_summary: Optional[str] = None
     classifier_category: Optional[str] = None
     classifier_urgency_score: Optional[float] = None
+    # Email body
+    email_body_preview: Optional[str] = None
+    email_body_content: Optional[str] = None
+    email_body_content_type: Optional[str] = None
 
 
 class ScheduleReviewCandidateListResponse(BaseModel):

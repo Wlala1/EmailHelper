@@ -6,7 +6,7 @@ from typing import Any, Optional
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from models import Email, SyncRun, SystemLease, User, UserMailboxAccount, UserMailboxState, UserWritingProfile
+from models import AgentRun, Email, SyncRun, SystemLease, User, UserMailboxAccount, UserMailboxState, UserWritingProfile
 from schemas import BootstrapStatus
 from utils import ensure_utc, utcnow
 
@@ -148,7 +148,7 @@ def get_users_due_for_poll(session: Session, *, poll_interval_seconds: int) -> l
             UserMailboxState.mailbox_connected.is_(True),
             UserMailboxState.polling_enabled.is_(True),
             UserMailboxState.bootstrap_status.in_(
-                [BootstrapStatus.running.value, BootstrapStatus.completed.value, BootstrapStatus.failed.value]
+                [BootstrapStatus.completed.value, BootstrapStatus.failed.value]
             ),
             (UserMailboxState.last_poll_at_utc.is_(None) | (UserMailboxState.last_poll_at_utc <= cutoff)),
         )
@@ -299,3 +299,117 @@ def release_lease(session: Session, *, lock_name: str, owner_id: str) -> None:
         return
     existing.locked_until_utc = utcnow()
     session.flush()
+
+
+def get_conversation_thread(
+    session: Session,
+    *,
+    conversation_id: str,
+    exclude_email_id: str,
+    limit: int = 10,
+) -> list[Email]:
+    """Return emails in the same conversation thread, ordered chronologically.
+
+    Excludes the current email. Uses conversation_id (Microsoft Graph thread ID)
+    so only emails within the exact same reply chain are returned — not all emails
+    from the same sender.
+    """
+    return list(
+        session.execute(
+            select(Email)
+            .where(
+                Email.conversation_id == conversation_id,
+                Email.email_id != exclude_email_id,
+            )
+            .order_by(Email.received_at_utc.asc())
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def get_emails_pending_classifier(
+    session: Session,
+    *,
+    user_id: str,
+    limit: int = 500,
+) -> list[Email]:
+    """Return live inbound emails that have no completed or in-progress classifier agent run."""
+    processed_subquery = (
+        select(AgentRun.email_id)
+        .where(
+            AgentRun.user_id == user_id,
+            AgentRun.agent_name == "classifier",
+            AgentRun.status.in_(("success", "started")),
+        )
+        .scalar_subquery()
+    )
+    return list(
+        session.scalars(
+            select(Email)
+            .where(
+                Email.user_id == user_id,
+                Email.processed_mode == "live",
+                Email.direction == "inbound",
+                Email.email_id.not_in(processed_subquery),
+            )
+            .order_by(Email.received_at_utc.desc())
+            .limit(limit)
+        ).all()
+    )
+
+
+def get_emails_for_category_suggestion(
+    session: Session,
+    *,
+    user_id: str,
+    days: int = 7,
+    limit: int = 500,
+) -> list[Email]:
+    """Return live inbound emails received in the past `days` days for weekly category suggestion."""
+    cutoff = utcnow() - timedelta(days=days)
+    return list(
+        session.scalars(
+            select(Email)
+            .where(
+                Email.user_id == user_id,
+                Email.processed_mode == "live",
+                Email.direction == "inbound",
+                Email.received_at_utc >= cutoff,
+            )
+            .order_by(Email.received_at_utc.desc())
+            .limit(limit)
+        ).all()
+    )
+
+
+def get_emails_pending_schedule(
+    session: Session,
+    *,
+    user_id: str,
+    limit: int = 200,
+) -> list[Email]:
+    """Return live inbound emails that have no completed or in-progress schedule agent run."""
+    processed_subquery = (
+        select(AgentRun.email_id)
+        .where(
+            AgentRun.user_id == user_id,
+            AgentRun.agent_name == "schedule",
+            AgentRun.status.in_(("success", "started")),
+        )
+        .scalar_subquery()
+    )
+    return list(
+        session.scalars(
+            select(Email)
+            .where(
+                Email.user_id == user_id,
+                Email.processed_mode == "live",
+                Email.direction == "inbound",
+                Email.email_id.not_in(processed_subquery),
+            )
+            .order_by(Email.received_at_utc.desc())
+            .limit(limit)
+        ).all()
+    )

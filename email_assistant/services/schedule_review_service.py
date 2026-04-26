@@ -40,6 +40,9 @@ def list_schedule_candidates(session: Session, *, user_id: str) -> dict[str, Any
                 "classifier_summary": classifier.summary if classifier else None,
                 "classifier_category": classifier.category if classifier else None,
                 "classifier_urgency_score": classifier.urgency_score if classifier else None,
+                "email_body_preview": email.body_preview if email else None,
+                "email_body_content": email.body_content if email else None,
+                "email_body_content_type": email.body_content_type if email else None,
             }
         )
     return {"user_id": user_id, "candidates": candidates}

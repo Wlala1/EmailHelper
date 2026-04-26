@@ -14,20 +14,42 @@ from agents.classification.common import (
 def heuristic_sender_role(sender_email: str, sender_name: Optional[str]) -> str:
     sender = (sender_email or "").lower()
     display = (sender_name or "").lower()
+    # Derive a short org label from the email domain (eTLD+1 SLD, title-cased)
+    org = ""
+    if "@" in sender:
+        domain = sender.split("@", 1)[1]
+        parts = domain.split(".")
+        # Handle two-part TLDs like .edu.sg, .co.uk
+        if len(parts) >= 3 and len(parts[-1]) == 2 and parts[-2] in {"edu", "co", "com", "ac", "gov"}:
+            sld = parts[-3]
+        elif len(parts) >= 2:
+            sld = parts[-2]
+        else:
+            sld = parts[0]
+        org = sld.upper() if len(sld) <= 4 else sld.title()
+
+    def _combine(role: str) -> str:
+        return f"{org} · {role}" if org else role
+
     if "prof" in display or "professor" in display:
-        return "Professor"
+        return _combine("Professor")
     if "admin" in sender or "office" in sender:
-        return "Administration"
+        return _combine("Administrator")
     if "career" in sender or "hr" in sender:
-        return "CareerService"
+        return _combine("Recruiter")
     if sender.endswith(".edu") or sender.endswith(".edu.sg"):
-        return "Teammate"
-    return "ExternalContact"
+        return _combine("Student")
+    # Use sender display name as role fallback rather than a generic label
+    if sender_name and sender_name.strip():
+        return _combine(sender_name.strip())
+    return _combine("External Contact")
 
 
 def heuristic_new_category_name(subject: str, text: str) -> str:
     combined = f"{subject}\n{text}".lower()
-    if "call for papers" in combined or "cfp" in combined or "submission" in combined:
+    if "call for papers" in combined or "cfp" in combined or (
+        "submission" in combined and any(k in combined for k in ("deadline", "paper", "conference", "workshop", "journal"))
+    ):
         return "Academic Conferences"
     if "canvas" in combined or "assignment" in combined or "quiz" in combined or "grade" in combined:
         return "Canvas Course Updates"

@@ -14,17 +14,19 @@ from config import (
     LEASE_DURATION_SECONDS,
     POLL_INTERVAL_SECONDS,
     PROFILE_REBUILD_INTERVAL_SECONDS,
+    SCHEDULE_AGENT_INTERVAL_SECONDS,
 )
 from db import SessionLocal
 from models import UserMailboxState
 from repositories import (
     acquire_lease,
+    get_emails_for_category_suggestion,
+    get_emails_pending_schedule,
     get_users_due_for_poll,
     get_users_pending_bootstrap,
     release_lease,
 )
 from services.calendar_feedback_service import sync_calendar_event_feedback
-from services.category_suggestion_service import generate_category_suggestions_for_user
 from services.mailbox_sync_service import MailboxSyncService
 from services.writing_profile_service import rebuild_user_writing_profile
 
@@ -36,6 +38,7 @@ class MailboxWorker:
         self.owner_id = f"worker-{uuid4()}"
         self.sync_service = MailboxSyncService(SessionLocal)
         self._last_profile_rebuild_at: float = 0.0
+        self._last_schedule_at: float = 0.0
         self._last_category_suggestion_at: float = 0.0
 
     def start(self) -> None:
@@ -62,6 +65,10 @@ class MailboxWorker:
             if now - self._last_profile_rebuild_at >= PROFILE_REBUILD_INTERVAL_SECONDS:
                 self.run_writing_profile_rebuild_cycle_once()
                 self._last_profile_rebuild_at = now
+
+            if now - self._last_schedule_at >= SCHEDULE_AGENT_INTERVAL_SECONDS:
+                self.run_schedule_cycle_once()
+                self._last_schedule_at = now
 
             if now - self._last_category_suggestion_at >= CATEGORY_SUGGESTION_INTERVAL_SECONDS:
                 self.run_category_suggestion_cycle_once()
@@ -134,14 +141,46 @@ class MailboxWorker:
             self._with_user_lease(f"profile-rebuild:{user_id}", _rebuild)
 
     def run_category_suggestion_cycle_once(self) -> None:
-        """Refresh category suggestions for all active users (runs every 12h)."""
+        """Run category suggestion agent on last-week live emails (every 1 week)."""
+        from uuid import uuid4 as _uuid4
+        from services.orchestration import execute_category_suggestion
+
         for user_id in self._get_active_user_ids():
-            self._with_user_lease(
-                f"category-suggestion:{user_id}",
-                lambda uid=user_id: generate_category_suggestions_for_user(
-                    SessionLocal, user_id=uid, sample_size=50, process_limit=50
-                ),
-            )
+            with SessionLocal() as session:
+                emails = get_emails_for_category_suggestion(session, user_id=user_id)
+            for email in emails:
+                email_id = email.email_id
+                trace_id = str(_uuid4())
+                self._with_user_lease(
+                    f"category_suggestion:{email_id}",
+                    lambda eid=email_id, tid=trace_id, uid=user_id: execute_category_suggestion(
+                        SessionLocal,
+                        trace_id=tid,
+                        email_id=eid,
+                        user_id=uid,
+                    ),
+                )
+
+    def run_schedule_cycle_once(self) -> None:
+        """Run schedule agent on all live inbound emails not yet processed (every 12h)."""
+        from uuid import uuid4 as _uuid4
+        from services.orchestration import execute_schedule
+
+        for user_id in self._get_active_user_ids():
+            with SessionLocal() as session:
+                emails = get_emails_pending_schedule(session, user_id=user_id)
+            for email in emails:
+                email_id = email.email_id
+                trace_id = str(_uuid4())
+                self._with_user_lease(
+                    f"schedule:{email_id}",
+                    lambda eid=email_id, tid=trace_id, uid=user_id: execute_schedule(
+                        SessionLocal,
+                        trace_id=tid,
+                        email_id=eid,
+                        user_id=uid,
+                    ),
+                )
 
     def _with_user_lease(self, lock_name: str, callback) -> None:
         session: Session = SessionLocal()

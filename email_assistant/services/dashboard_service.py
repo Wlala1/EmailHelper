@@ -17,10 +17,10 @@ from models import (
 )
 from repositories import (
     get_current_reply_suggestion,
-    get_unaccepted_high_priority_candidates,
     get_user_writing_profile,
     list_category_suggestions,
 )
+from repository.classification import list_pending_schedule_candidates
 from services.category_suggestion_service import serialize_category_suggestion
 
 
@@ -69,6 +69,7 @@ def _top_relationships(session: Session, *, user_id: str) -> list[dict]:
         .order_by(RelationshipObservation.created_at_utc.desc())
     ).all()
     aggregate: dict[str, dict] = {}
+    email_ids_by_person: dict[str, list[str]] = {}
     for obs in observations:
         bucket = aggregate.setdefault(
             obs.person_email,
@@ -76,7 +77,6 @@ def _top_relationships(session: Session, *, user_id: str) -> list[dict]:
                 "person_email": obs.person_email,
                 "person_name": obs.person_name,
                 "person_role": obs.person_role,
-                "organisation_name": obs.organisation_name,
                 "observation_count": 0,
             },
         )
@@ -85,8 +85,24 @@ def _top_relationships(session: Session, *, user_id: str) -> list[dict]:
             bucket["person_name"] = obs.person_name
         if not bucket.get("person_role") and obs.person_role:
             bucket["person_role"] = obs.person_role
-        if not bucket.get("organisation_name") and obs.organisation_name:
-            bucket["organisation_name"] = obs.organisation_name
+        if obs.signal_type == "email_from":
+            email_ids_by_person.setdefault(obs.person_email, []).append(obs.email_id)
+
+    # Look up the most recent classifier category per person (sender emails only)
+    for person_email, email_ids in email_ids_by_person.items():
+        clf = session.scalars(
+            select(ClassifierResult)
+            .where(
+                ClassifierResult.user_id == user_id,
+                ClassifierResult.email_id.in_(email_ids),
+                ClassifierResult.is_current.is_(True),
+            )
+            .order_by(ClassifierResult.created_at_utc.desc())
+            .limit(1)
+        ).first()
+        if clf and person_email in aggregate:
+            aggregate[person_email]["email_category"] = clf.category
+
     ranked = sorted(
         aggregate.values(),
         key=lambda item: (item["observation_count"], item["person_email"]),
@@ -94,6 +110,7 @@ def _top_relationships(session: Session, *, user_id: str) -> list[dict]:
     )[:20]
     for item in ranked:
         item["relationship_weight"] = round(min(1.0, item["observation_count"] / 10.0 + 0.5), 4)
+        item.setdefault("email_category", None)
     return ranked
 
 
@@ -106,7 +123,7 @@ def build_user_dashboard(session: Session, *, user_id: str) -> dict[str, object]
         session.execute(
             select(func.count(func.distinct(AgentRun.email_id))).where(
                 AgentRun.user_id == user_id,
-                AgentRun.agent_name == "response",
+                AgentRun.agent_name == "classifier",
                 AgentRun.status == "success",
                 AgentRun.created_at_utc >= week_ago,
             )
@@ -153,7 +170,7 @@ def build_user_dashboard(session: Session, *, user_id: str) -> dict[str, object]
         ).scalar()
         or 0
     )
-    proactive_candidate_count = len(get_unaccepted_high_priority_candidates(session, user_id))
+    proactive_candidate_count = len(list_pending_schedule_candidates(session, user_id))
 
     feedback_events = session.scalars(
         select(UserFeedbackEvent)
@@ -173,14 +190,8 @@ def build_user_dashboard(session: Session, *, user_id: str) -> dict[str, object]
             "subtitle": "Last 7 days",
         },
         {
-            "key": "pending_reviews",
-            "label": "Pending Reply Reviews",
-            "value": len(pending_review_items),
-            "subtitle": "Human approval required",
-        },
-        {
             "key": "pending_tags",
-            "label": "Pending Tag Suggestions",
+            "label": "Pending Category Suggestions",
             "value": len(pending_suggestions),
             "subtitle": "Awaiting accept or reject",
         },
@@ -189,6 +200,12 @@ def build_user_dashboard(session: Session, *, user_id: str) -> dict[str, object]
             "label": "Recent Tentative Events",
             "value": recent_written_count,
             "subtitle": "Outlook drafts written in the last 7 days",
+        },
+        {
+            "key": "pending_reviews",
+            "label": "Pending Reply Reviews",
+            "value": len(pending_review_items),
+            "subtitle": "Human approval required",
         },
     ]
 

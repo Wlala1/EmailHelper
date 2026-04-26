@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -139,17 +138,6 @@ def handle_microsoft_callback(session: Session, *, code: str, state: str | None 
         update_user_mailbox_state(session, user_id=user_id, inbox_delta_token=inbox_delta, sent_delta_token=sent_delta)
 
     session.commit()
-
-    if current_status not in ("completed", "running", "failed"):
-        # New connection — kick off bootstrap immediately instead of waiting
-        # for the next background worker cycle (which may be up to 10 min away).
-        def _bootstrap_now(uid: str) -> None:
-            try:
-                MailboxSyncService(SessionLocal).bootstrap_user(uid)
-            except Exception:
-                logger.exception("Immediate bootstrap thread failed for user %s", uid)
-
-        threading.Thread(target=_bootstrap_now, args=(user_id,), daemon=True).start()
 
     return build_mailbox_connection_response(session, user.user_id)
 

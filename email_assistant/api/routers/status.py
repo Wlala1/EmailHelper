@@ -46,6 +46,36 @@ def retry_user_bootstrap(user_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/v2/users/{user_id}/relationship_graph", response_model=dict)
+def user_relationship_graph(user_id: str, db: Session = Depends(get_db)):
+    from services.neo4j_service import get_relationship_graph_data, is_neo4j_available
+    from services.dashboard_service import _top_relationships
+
+    if is_neo4j_available():
+        data = get_relationship_graph_data(user_id=user_id)
+        if data:
+            return data
+
+    # SQL fallback — wraps existing dashboard query into same schema
+    persons = _top_relationships(db, user_id=user_id)
+    return {
+        "persons": [
+            {
+                "person_email": p["person_email"],
+                "person_name": p.get("person_name"),
+                "person_role": p.get("person_role"),
+                "email_category": p.get("email_category"),
+                "recent_topics": None,
+                "last_interaction_summary": None,
+                "observation_count": p["observation_count"],
+                "decayed_weight": float(p["relationship_weight"]),
+            }
+            for p in persons
+        ],
+        "source": "sql_fallback",
+    }
+
+
 @router.get("/v2/traces/{trace_id}/emails/{email_id}/status", response_model=dict)
 def trace_email_status(trace_id: str, email_id: str, db: Session = Depends(get_db)):
     return build_trace_email_status(db, trace_id=trace_id, email_id=email_id)

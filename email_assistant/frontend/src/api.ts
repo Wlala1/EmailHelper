@@ -91,6 +91,8 @@ export type ReplyReviewStatus = {
   email_sender_name?: string | null;
   email_sender_email?: string | null;
   email_body_preview?: string | null;
+  email_body_content?: string | null;
+  email_body_content_type?: string | null;
 };
 
 export type ReplyReviewResult = {
@@ -130,6 +132,25 @@ export type ScheduleCandidate = {
   classifier_summary?: string | null;
   classifier_category?: string | null;
   classifier_urgency_score?: number | null;
+  email_body_preview?: string | null;
+  email_body_content?: string | null;
+  email_body_content_type?: string | null;
+};
+
+export type RelationshipPerson = {
+  person_email: string;
+  person_name?: string | null;
+  person_role?: string | null;
+  email_category?: string | null;
+  recent_topics?: string[] | null;
+  last_interaction_summary?: string | null;
+  observation_count: number;
+  decayed_weight: number;
+};
+
+export type RelationshipGraphData = {
+  persons: RelationshipPerson[];
+  source: string;
 };
 
 export type UserStatus = {
@@ -177,6 +198,10 @@ export function getUserStatus(userId: string) {
 
 export function getDashboard(userId: string) {
   return request<UserDashboard>(`/v2/users/${userId}/dashboard`);
+}
+
+export function getRelationshipGraph(userId: string) {
+  return request<RelationshipGraphData>(`/v2/users/${userId}/relationship_graph`);
 }
 
 export function getTagSuggestions(userId: string) {

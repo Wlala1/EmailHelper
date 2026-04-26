@@ -23,7 +23,6 @@ class EmailPipelineState(TypedDict):
     category_catalog_override: Optional[list]
     classifier_output: Optional[dict]
     relationship_output: Optional[dict]
-    schedule_output: Optional[dict]
     response_output: Optional[dict]
     draft_output: Optional[dict]
     errors: Annotated[list[dict], operator.add]
@@ -63,21 +62,6 @@ def _node_relationship_graph(state: EmailPipelineState) -> dict:
         return {"relationship_output": None, "errors": [{"step": "relationship_graph", "error": str(exc)}]}
 
 
-def _node_schedule(state: EmailPipelineState) -> dict:
-    from services.orchestration import execute_schedule
-    try:
-        output = execute_schedule(
-            state["session_factory"],
-            trace_id=state["trace_id"],
-            email_id=state["email_id"],
-            user_id=state["user_id"],
-        )
-        return {"schedule_output": output, "errors": []}
-    except Exception as exc:
-        logger.error("schedule node failed: %s", exc)
-        return {"schedule_output": None, "errors": [{"step": "schedule", "error": str(exc)}]}
-
-
 def _node_response(state: EmailPipelineState) -> dict:
     from services.orchestration import execute_response
     try:
@@ -113,27 +97,20 @@ def _build_live_graph():
     """
     Live pipeline graph:
 
-        START → classifier ─┬─→ relationship_graph ─┐
-                            └─→ schedule            ─┴─→ response → draft → END
+        START → classifier → relationship_graph → response → draft → END
 
-    relationship_graph and schedule execute in parallel (LangGraph fan-out).
-    response waits for both branches to complete (fan-in).
+    Classifier runs assign-only (allow_suggestions=False). Schedule agent runs as a separate 24h cycle.
     """
     g = StateGraph(EmailPipelineState)
 
     g.add_node("classifier", _node_classifier)
     g.add_node("relationship_graph", _node_relationship_graph)
-    g.add_node("schedule", _node_schedule)
     g.add_node("response", _node_response)
     g.add_node("draft", _node_draft)
 
     g.add_edge(START, "classifier")
-    # Fan-out: classifier → two parallel branches
     g.add_edge("classifier", "relationship_graph")
-    g.add_edge("classifier", "schedule")
-    # Fan-in: both branches must complete before response
     g.add_edge("relationship_graph", "response")
-    g.add_edge("schedule", "response")
     g.add_edge("response", "draft")
     g.add_edge("draft", END)
 
@@ -181,7 +158,6 @@ def _initial_state(
         category_catalog_override=category_catalog_override,
         classifier_output=None,
         relationship_output=None,
-        schedule_output=None,
         response_output=None,
         draft_output=None,
         errors=[],
@@ -208,7 +184,6 @@ def process_live_inbox_email_graph(
     return {
         "classifier": state.get("classifier_output"),
         "relationship_graph": state.get("relationship_output"),
-        "schedule": state.get("schedule_output"),
         "response": state.get("response_output"),
         "draft_write": state.get("draft_output"),
         "errors": state.get("errors", []),

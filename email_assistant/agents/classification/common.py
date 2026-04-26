@@ -29,10 +29,28 @@ Output JSON only:
   \"new_category_description\": \"\",
   \"urgency_score\": 0.0,
   \"summary\": \"concise Chinese summary\",
-  \"sender_role\": \"Professor/Teammate/Admin/Company/etc.\",
   \"named_entities\": [],
   \"time_expressions\": []
 }
+"""
+
+CLASSIFIER_TOOL_PROMPT = """You are an email classifier. Use the tools to actively explore \
+existing categories before making a decision.
+
+Workflow (follow in order):
+1. Call search_categories with 2-3 keywords from the email subject/body to find relevant categories.
+2. If a result looks promising, call get_category_details to read its full description.
+3. If an existing category fits well, use it. If none fit, create a new one.
+4. Call finalize_classification ONCE as your last action with ALL required fields.
+
+Rules:
+- Prefer reusing an existing category over creating a new one.
+- Only create a new category if no existing one matches the email's topic after searching.
+- category_name must be title-case, ≤ 64 chars, letters/numbers/spaces/hyphens only.
+- summary must be a concise Chinese summary (2-3 sentences).
+- urgency_score: 0.9+ for deadlines/action-required, 0.5 for informational, 0.2 for newsletters.
+- named_entities: people, organisations, emails found in the email (max 10).
+- time_expressions: dates/times found in the email in their original form (max 10).
 """
 
 ATTACHMENT_SUMMARY_PROMPT = """You compress extracted email attachment content for a downstream classifier.
@@ -56,23 +74,36 @@ Rules:
 """
 
 STOPWORDS = {
-    "this",
-    "that",
-    "with",
-    "from",
-    "your",
-    "have",
-    "will",
-    "please",
-    "subject",
-    "email",
-    "about",
-    "thanks",
-    "dear",
-    "team",
-    "regards",
-    "hello",
-    "there",
+    # articles / determiners
+    "the", "this", "that", "these", "those", "any", "all", "both", "each",
+    # pronouns
+    "you", "your", "our", "their", "they", "them", "its", "his", "her",
+    "we", "who", "whom", "which", "what",
+    # prepositions / conjunctions
+    "with", "from", "into", "onto", "upon", "about", "above", "below",
+    "before", "after", "between", "through", "during", "without",
+    "and", "but", "not", "nor", "yet", "for", "than", "then", "also",
+    # common auxiliaries / modals
+    "have", "has", "had", "having", "been", "being", "are", "were", "was",
+    "will", "would", "could", "should", "shall", "may", "might", "must",
+    "can", "does", "did", "doing",
+    # super-generic verbs
+    "get", "got", "let", "set", "put", "use", "used", "make", "made",
+    "take", "took", "give", "gave", "see", "look", "come", "came", "know",
+    "want", "need", "like", "just", "now", "new", "add", "include",
+    # email-specific filler
+    "please", "subject", "email", "thanks", "dear", "team", "regards",
+    "hello", "there", "best", "hope", "write", "reply", "send", "sent",
+    "attach", "attached", "forward", "message", "receipt", "confirm",
+    # generic adjectives / adverbs
+    "very", "more", "most", "some", "such", "only", "other", "same",
+    "well", "also", "here", "where", "when", "how", "why", "much",
+    # layout / CSS words that leak from HTML body_content
+    "vertical", "focus", "allow", "become", "optimization", "display",
+    "margin", "padding", "border", "color", "background", "font",
+    "width", "height", "align", "content", "block", "inline", "none",
+    "auto", "absolute", "relative", "flex", "grid", "style", "class",
+    "table", "tbody", "thead", "span", "div", "html", "body", "head",
 }
 
 
@@ -149,7 +180,7 @@ def extract_entities(text: str) -> list[str]:
         entities.add(email)
     for match in re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", text):
         entities.add(match)
-    return sorted(entities)[:30]
+    return sorted(entities)[:10]
 
 
 def extract_time_expressions(text: str) -> list[str]:
@@ -162,7 +193,7 @@ def extract_time_expressions(text: str) -> list[str]:
     found: list[str] = []
     for pattern in patterns:
         found.extend(re.findall(pattern, text))
-    return dedup_keep_order(found)[:20]
+    return dedup_keep_order(found)[:10]
 
 
 def build_email_context(email: Any, budget: int) -> str:

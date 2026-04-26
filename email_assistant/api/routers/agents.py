@@ -69,7 +69,7 @@ def classifier_tag_suggestions(
     status: list[CategorySuggestionStatus] | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    statuses = [item.value for item in status] if status else None
+    statuses = [item.value for item in status] if status else ["pending", "accepted"]
     return list_category_suggestions_for_user(db, user_id=user_id, statuses=statuses)
 
 

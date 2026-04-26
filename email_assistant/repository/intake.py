@@ -157,6 +157,16 @@ def get_email_attachments(session: Session, email_id: str) -> list[Attachment]:
     return session.scalars(select(Attachment).where(Attachment.email_id == email_id)).all()
 
 
+def get_recent_emails_for_user(session: Session, user_id: str, *, limit: int) -> list[Email]:
+    """Return the most recent emails for a user regardless of classification status."""
+    return session.scalars(
+        select(Email)
+        .where(Email.user_id == user_id)
+        .order_by(Email.received_at_utc.desc(), Email.created_at_utc.desc())
+        .limit(limit)
+    ).all()
+
+
 def get_unclassified_emails_for_user(session: Session, user_id: str, *, limit: int) -> list[Email]:
     current_classifier = (
         select(ClassifierResult.email_id)

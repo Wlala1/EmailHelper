@@ -183,6 +183,72 @@ def sync_email_entities(
         return {"status": "failed", "error": str(exc)}
 
 
+def get_relationship_graph_data(*, user_id: str) -> Optional[dict[str, Any]]:
+    """Return all persons + org memberships for the user in one Cypher query.
+
+    Aggregates all OBSERVED_CONTACT edges per person (email_from / email_to /
+    email_cc signal types), computes time-decayed weight, and collects each
+    person's MEMBER_OF organisations.  Returns None when Neo4j is unavailable.
+    """
+    if not is_neo4j_available():
+        return None
+
+    query = """
+    MATCH (u:User {user_id: $user_id})-[r:OBSERVED_CONTACT]->(p:Person)
+    WITH p,
+         sum(coalesce(toFloat(r.raw_weight), 0))   AS total_raw_weight,
+         max(r.last_observed_at)                    AS last_observed,
+         sum(coalesce(toInteger(r.observation_count), 0)) AS total_obs
+    WITH p, total_raw_weight, last_observed, total_obs,
+         CASE
+           WHEN total_raw_weight > 0 AND last_observed IS NOT NULL
+           THEN total_raw_weight * exp(
+             -0.007702 * toFloat(
+               datetime().epochMillis - datetime(last_observed).epochMillis
+             ) / 86400000.0
+           )
+           ELSE total_raw_weight
+         END AS decayed_weight
+    ORDER BY decayed_weight DESC
+    LIMIT 30
+    RETURN p.email                    AS person_email,
+           p.name                     AS person_name,
+           p.role                     AS person_role,
+           p.category                 AS email_category,
+           p.recent_topics            AS recent_topics,
+           p.last_interaction_summary AS last_interaction_summary,
+           total_obs                  AS observation_count,
+           decayed_weight
+    """
+    try:
+        driver = get_neo4j_driver()
+        try:
+            with driver.session() as session:
+                records = session.run(query, user_id=user_id).data()
+                persons = []
+                for rec in records:
+                    persons.append({
+                        "person_email": rec["person_email"],
+                        "person_name": rec.get("person_name"),
+                        "person_role": rec.get("person_role"),
+                        "email_category": rec.get("email_category"),
+                        "recent_topics": rec.get("recent_topics"),
+                        "last_interaction_summary": rec.get("last_interaction_summary"),
+                        "observation_count": int(rec.get("observation_count") or 0),
+                        "decayed_weight": float(rec.get("decayed_weight") or 0.0),
+                    })
+                max_weight = max((p["decayed_weight"] for p in persons), default=0.0)
+                if max_weight > 0:
+                    for p in persons:
+                        p["decayed_weight"] = round(p["decayed_weight"] / max_weight, 4)
+                return {"persons": persons, "source": "neo4j"}
+        finally:
+            driver.close()
+    except Exception as exc:
+        logger.warning("get_relationship_graph_data failed: %s", exc)
+        return None
+
+
 def get_person_context(
     *,
     user_id: str,
@@ -210,6 +276,8 @@ def get_person_context(
     RETURN p.role AS person_role,
            o.name AS org_name,
            o.domain AS org_domain,
+           p.recent_topics AS recent_topics,
+           p.last_interaction_summary AS last_interaction_summary,
            CASE
              WHEN r.raw_weight IS NOT NULL AND r.last_observed_at IS NOT NULL
              THEN
@@ -245,6 +313,8 @@ def get_person_context(
                     "person_role": record["person_role"],
                     "org_name": record["org_name"],
                     "org_domain": record["org_domain"],
+                    "recent_topics": record["recent_topics"],
+                    "last_interaction_summary": record["last_interaction_summary"],
                     "decayed_weight": record["decayed_weight"],
                     "observation_count": record["observation_count"],
                     "last_observed_at": record["last_observed_at"],

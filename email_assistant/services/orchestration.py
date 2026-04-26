@@ -41,7 +41,14 @@ MEETING_CATEGORY_RE = re.compile(
     r"\b(meetings?|schedule|calendar|call|interview|sync|appointment)\b",
     re.IGNORECASE,
 )
-BULK_SENDER_RE = re.compile(r"(^|[^a-z])(no-?reply|newsletter|notifications?)([^a-z]|$)", re.IGNORECASE)
+BULK_SENDER_RE = re.compile(
+    # Word-boundary keywords anywhere in the address
+    r"(^|[^a-z])(no-?reply|do-?not-?reply|newsletter|notifications?|announce[a-z]*|"
+    r"communications?|broadcast|circular|digest|mailer|updates?)([^a-z]|$)"
+    # Suffix keywords immediately before the @ (catches csnews@, libcomms@, cmsem@, uhc_wellness@)
+    r"|(news|comms|sem|wellness|events?)@",
+    re.IGNORECASE,
+)
 
 
 def _stable_email_id(raw_value: str) -> str:
@@ -140,7 +147,30 @@ def execute_classifier(
         },
         runner=run_classifier,
         error_code="CLASSIFIER_ERROR",
-        runner_kwargs={"category_catalog_override": category_catalog_override},
+        runner_kwargs={
+            "category_catalog_override": category_catalog_override,
+            "allow_suggestions": False,
+        },
+    )
+
+
+def execute_category_suggestion(
+    session_factory: sessionmaker,
+    *,
+    trace_id: str,
+    email_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    from agents.classification.category_suggestion_agent import run_category_suggestion
+    return _execute_agent_step(
+        session_factory,
+        agent_name="category_suggestion",
+        trace_id=trace_id,
+        email_id=email_id,
+        user_id=user_id,
+        input_payload={"email_id": email_id},
+        runner=run_category_suggestion,
+        error_code="CATEGORY_SUGGESTION_ERROR",
     )
 
 
@@ -178,7 +208,7 @@ def execute_schedule(session_factory: sessionmaker, *, trace_id: str, email_id: 
 
 def execute_response(session_factory: sessionmaker, *, trace_id: str, email_id: str, user_id: str) -> dict[str, Any]:
     with session_factory() as session:
-        statuses = get_latest_branch_statuses(session, trace_id, email_id, ["attachment", "relationship_graph", "schedule"])
+        statuses = get_latest_branch_statuses(session, trace_id, email_id, ["attachment", "relationship_graph"])
     for name, status in statuses.items():
         if status not in {AgentRunStatus.success.value, AgentRunStatus.skipped.value}:
             raise RuntimeError(f"response blocked: branch '{name}' status is '{status}'")
@@ -234,8 +264,6 @@ def build_graph_intake_payload(
                 }
             )
 
-    from utils.pii import anonymize_text
-
     payload = {
         "user": {
             "user_id": user_id,
@@ -252,10 +280,10 @@ def build_graph_intake_payload(
             "graph_parent_folder_id": message.get("parentFolderId"),
             "sender_name": sender.get("name"),
             "sender_email": sender.get("address") or primary_email or "unknown@example.com",
-            "subject": anonymize_text(message.get("subject") or ""),
+            "subject": message.get("subject") or "",
             "body_content_type": body_content_type,
-            "body_content": anonymize_text(body_content or ""),
-            "body_preview": anonymize_text(message.get("bodyPreview") or ""),
+            "body_content": body_content or "",
+            "body_preview": message.get("bodyPreview") or "",
             "received_at_utc": received_at.isoformat(),
             "has_attachments": bool(message.get("hasAttachments")),
             "direction": direction,
@@ -442,6 +470,7 @@ def process_historical_inbox_email(
     trace_id: str,
     email_id: str,
     user_id: str,
+    category_catalog_override: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     from services.langgraph_pipeline import process_historical_inbox_email_graph
     return process_historical_inbox_email_graph(
@@ -449,4 +478,5 @@ def process_historical_inbox_email(
         trace_id=trace_id,
         email_id=email_id,
         user_id=user_id,
+        category_catalog_override=category_catalog_override,
     )

@@ -11,6 +11,7 @@ from repositories import (
     create_category_definition,
     get_category_definitions,
     get_category_suggestion,
+    get_recent_emails_for_user,
     get_unclassified_emails_for_user,
     list_category_suggestions,
     set_category_suggestion_status,
@@ -19,11 +20,21 @@ from repositories import (
 from services.batch_backfill_service import classify_backlog_for_user, generate_dynamic_topics
 
 
+def _strip_html(text: str) -> str:
+    import re
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _email_text(email: Any) -> str:
-    return f"{email.subject or ''}\n{email.body_content or email.body_preview or ''}"
+    body = email.body_preview or ""
+    if not body and email.body_content:
+        body = _strip_html(email.body_content)
+    return f"{email.subject or ''}\n{body}"
 
 
-def _supporting_context(topic: dict[str, str], sample_emails: list[Any]) -> tuple[list[str], list[str], list[str]]:
+def _supporting_context(topic: dict[str, str], sample_emails: list[Any], fallback_offset: int = 0) -> tuple[list[str], list[str], list[str]]:
     topic_tokens = tokenize(f"{topic['category_name']} {topic['category_description']}")
     scored: list[tuple[int, int, Any]] = []
     for index, email in enumerate(sample_emails):
@@ -34,7 +45,11 @@ def _supporting_context(topic: dict[str, str], sample_emails: list[Any]) -> tupl
             score += 2
         scored.append((score, -index, email))
     scored.sort(reverse=True)
-    supporting = [item[-1] for item in scored if item[0] > 0][:4] or sample_emails[:3]
+    supporting = [item[-1] for item in scored if item[0] > 0][:4]
+    if not supporting and sample_emails:
+        # Stagger the fallback slice so each topic gets different supporting emails
+        start = fallback_offset % len(sample_emails)
+        supporting = sample_emails[start:start + 3] or sample_emails[:3]
     keyword_counter: Counter[str] = Counter()
     for email in supporting:
         keyword_counter.update(tokenize(_email_text(email)))
@@ -91,9 +106,12 @@ def generate_category_suggestions_for_user(
     with session_factory() as session:
         backlog = get_unclassified_emails_for_user(session, user_id, limit=limit)
         if not backlog:
+            # All emails are classified — sample recent emails for topic discovery instead
+            backlog = get_recent_emails_for_user(session, user_id, limit=limit)
+        if not backlog:
             return {
                 "status": "success",
-                "reason": "no_unclassified_emails",
+                "reason": "no_emails",
                 "user_id": user_id,
                 "sample_size": sample_size,
                 "process_limit": process_limit,
@@ -106,11 +124,11 @@ def generate_category_suggestions_for_user(
         existing_names = {item.category_name for item in get_category_definitions(session, user_id)}
         created_from_email_id = sample_emails[0].email_id if sample_emails else None
         suggestions: list[dict[str, Any]] = []
-        for topic in discovered_topics:
+        for idx, topic in enumerate(discovered_topics):
             category_name = normalize_category_name(topic["category_name"])
             if category_name in existing_names:
                 continue
-            supporting_email_ids, supporting_subjects, rationale_keywords = _supporting_context(topic, sample_emails)
+            supporting_email_ids, supporting_subjects, rationale_keywords = _supporting_context(topic, sample_emails, fallback_offset=idx * 3)
             suggestion = upsert_category_suggestion(
                 session,
                 user_id=user_id,
@@ -193,7 +211,23 @@ def decide_category_suggestion(
             for item in get_category_definitions(session, suggestion.user_id)
         ]
         accepted_user_id = suggestion.user_id
+        accepted_category_name = suggestion.category_name
         accepted_process_limit = suggestion.process_limit or CATEGORY_SUGGESTION_BACKFILL_LIMIT
+        session.commit()
+
+    # Bulk-update ClassifierResult rows that voted for this category
+    from sqlalchemy import update as sa_update
+    from models import ClassifierResult
+    with session_factory() as session:
+        session.execute(
+            sa_update(ClassifierResult)
+            .where(
+                ClassifierResult.user_id == accepted_user_id,
+                ClassifierResult.proposed_category_name == accepted_category_name,
+                ClassifierResult.is_current.is_(True),
+            )
+            .values(category=accepted_category_name, proposed_category_name=None)
+        )
         session.commit()
 
     backfill = classify_backlog_for_user(

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   CategorySuggestion,
   PendingReviewItem,
+  RelationshipGraphData,
   ReplyReviewStatus,
   ScheduleCandidate,
   UserDashboard,
@@ -10,6 +11,7 @@ import {
   decideTagSuggestion,
   getDashboard,
   getMicrosoftAuthUrl,
+  getRelationshipGraph,
   getReplyReviewStatus,
   getScheduleCandidates,
   getTagSuggestions,
@@ -110,8 +112,13 @@ function App() {
   const [reviewStatus, setReviewStatus] = useState<ReplyReviewStatus | null>(null);
   const [selectedTone, setSelectedTone] = useState("professional");
   const [editedBody, setEditedBody] = useState("");
+  const [expandedBody, setExpandedBody] = useState(false);
+  const detailRef = useRef<HTMLDivElement>(null);
   const [scheduleCandidates, setScheduleCandidates] = useState<ScheduleCandidate[]>([]);
+  const [relationshipGraph, setRelationshipGraph] = useState<RelationshipGraphData | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<ScheduleCandidate | null>(null);
+  const [expandedScheduleBody, setExpandedScheduleBody] = useState(false);
+  const scheduleDetailRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -218,6 +225,8 @@ function App() {
 
   useEffect(() => {
     if (!selectedReviewItem) return;
+    setExpandedBody(false);
+    detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     let cancelled = false;
     const load = async () => {
       setLoading(true);
@@ -239,6 +248,14 @@ function App() {
     return () => { cancelled = true; };
   }, [selectedReviewItem?.email_id]);
 
+  // ── Reset and scroll when schedule candidate selection changes ───────────
+
+  useEffect(() => {
+    if (!selectedCandidate) return;
+    setExpandedScheduleBody(false);
+    scheduleDetailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [selectedCandidate?.candidate_id]);
+
   // ── Load schedule candidates when switching to schedule view ──────────────
 
   useEffect(() => {
@@ -255,6 +272,23 @@ function App() {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load schedule candidates");
       } finally {
         if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [view, activeUserId]);
+
+  // ── Load relationship graph when switching to insights ────────────────────
+
+  useEffect(() => {
+    if (view !== "insights" || !activeUserId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = await getRelationshipGraph(activeUserId);
+        if (!cancelled) setRelationshipGraph(data);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load relationship graph");
       }
     };
     void load();
@@ -396,14 +430,6 @@ function App() {
             <span className="user-email">{userStatus?.primary_email}</span>
           </div>
           <div className="header-actions">
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => void handleRefreshSuggestions()}
-              disabled={loading}
-            >
-              Refresh Tags
-            </button>
             <button type="button" className="secondary" onClick={handleLogout}>
               Sign out
             </button>
@@ -416,16 +442,20 @@ function App() {
       </header>
 
       <nav className="nav-tabs">
-        {(["overview", "review", "tags", "schedule", "insights"] as ViewKey[]).map((key) => {
+        {(["overview", "tags", "schedule", "review", "insights"] as ViewKey[]).map((key) => {
           const label =
             key === "overview" ? "Overview"
-            : key === "review" ? "Review Queue"
-            : key === "tags" ? "Tag Suggestions"
+            : key === "tags" ? "Category Suggestions"
             : key === "schedule" ? "Schedule"
+            : key === "review" ? "Review Queue"
             : "Insights";
           const badge =
             key === "schedule" && (dashboard?.schedule_overview.proactive_candidate_count ?? 0) > 0
               ? dashboard!.schedule_overview.proactive_candidate_count
+              : key === "tags" && (dashboard?.pending_tag_suggestions?.length ?? 0) > 0
+              ? dashboard!.pending_tag_suggestions.length
+              : key === "review" && (dashboard?.pending_review_items?.length ?? 0) > 0
+              ? dashboard!.pending_review_items.length
               : null;
           return (
             <button
@@ -457,43 +487,76 @@ function App() {
                 </article>
               ))}
             </div>
-            <div className="pipeline-panel">
-              <div className="pipeline-node">Email Intake</div>
-              <div className="pipeline-arrow">→</div>
-              <div className="pipeline-node">Classifier</div>
-              <div className="pipeline-arrow">→</div>
-              <div className="pipeline-node">Attachment | Relationship | Schedule</div>
-              <div className="pipeline-arrow">→</div>
-              <div className="pipeline-node">Response + Human Review</div>
-            </div>
-            <div className="overview-columns">
-              <article className="mini-panel">
-                <h3>Pending Reply Queue</h3>
-                {(dashboard?.pending_review_items ?? []).map((item) => (
-                  <div key={item.email_id} className="list-row">
-                    <div>
-                      <strong>{item.subject ?? "(No Subject)"}</strong>
-                      <p>{item.sender_name ?? item.sender_email}</p>
-                    </div>
-                    <span>{formatDate(item.received_at_utc)}</span>
+            <div className="pipelines-section">
+              {/* Bootstrap pipeline */}
+              <div className="pipeline-group">
+                <div className="pipeline-group-label">
+                  <span className="pipeline-mode-dot bootstrap-dot" />
+                  Bootstrap
+                  <span className="pipeline-mode-sub">· runs once · past 180 days · fully automated</span>
+                </div>
+                <div className="pipeline-row">
+                  <div className="pipeline-node">Intake</div>
+                  <div className="pipeline-arrow">→</div>
+                  <div className="pipeline-node">Classifier</div>
+                  <div className="pipeline-arrow">→</div>
+                  <div className="pipeline-node">Relationship Graph</div>
+                </div>
+              </div>
+
+              {/* Live pipeline */}
+              <div className="pipeline-group">
+                <div className="pipeline-group-label">
+                  <span className="pipeline-mode-dot live-dot" />
+                  Live Polling
+                  <span className="pipeline-mode-sub">· every 5 min · new incoming emails</span>
+                </div>
+                <div className="pipeline-row">
+                  <div className="pipeline-node">Intake</div>
+                  <div className="pipeline-arrow">→</div>
+                  <div className="pipeline-node-stack">
+                    <div className="pipeline-node">Classifier</div>
+                    <div className="pipeline-review-badge">Assign-only · no new categories</div>
                   </div>
-                ))}
-                {(dashboard?.pending_review_items ?? []).length === 0 && (
-                  <div className="empty-state">No pending replies.</div>
-                )}
-              </article>
-              <article className="mini-panel">
-                <h3>Pending Tag Suggestions</h3>
-                {suggestions.slice(0, 4).map((item) => (
-                  <div key={item.suggestion_id} className="tag-card compact">
-                    <strong>{item.category_name}</strong>
-                    <p>{item.category_description}</p>
+                  <div className="pipeline-arrow">→</div>
+                  <div className="pipeline-node">Relationship Graph</div>
+                  <div className="pipeline-arrow">→</div>
+                  <div className="pipeline-node-stack">
+                    <div className="pipeline-node">Response</div>
+                    <div className="pipeline-review-badge">Reply Drafts · Human Review</div>
                   </div>
-                ))}
-                {suggestions.length === 0 && (
-                  <div className="empty-state">No pending suggestions.</div>
-                )}
-              </article>
+                </div>
+              </div>
+
+              {/* Weekly category suggestion background cycle */}
+              <div className="pipeline-group">
+                <div className="pipeline-group-label">
+                  <span className="pipeline-mode-dot classifier-dot" />
+                  Background — Category Suggestion Agent
+                  <span className="pipeline-mode-sub">· every 1 week · last 7 days of live emails</span>
+                </div>
+                <div className="pipeline-row">
+                  <div className="pipeline-node-stack">
+                    <div className="pipeline-node">Category Suggestion Agent</div>
+                    <div className="pipeline-review-badge">Category Suggestions · auto</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 24h schedule background cycle */}
+              <div className="pipeline-group">
+                <div className="pipeline-group-label">
+                  <span className="pipeline-mode-dot schedule-dot" />
+                  Background — Schedule Agent
+                  <span className="pipeline-mode-sub">· every 24 h · unprocessed live emails</span>
+                </div>
+                <div className="pipeline-row">
+                  <div className="pipeline-node-stack">
+                    <div className="pipeline-node">Schedule Agent</div>
+                    <div className="pipeline-review-badge">Calendar Events · Human Review</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
         ) : null}
@@ -522,7 +585,7 @@ function App() {
                 ))
               )}
             </div>
-            <div className="detail-column">
+            <div className="detail-column" ref={detailRef}>
               {reviewStatus ? (
                 <>
                   <div className="email-context-panel">
@@ -535,9 +598,34 @@ function App() {
                       </span>
                       <span className="email-context-date">{formatDate(selectedReviewItem?.received_at_utc)}</span>
                     </div>
-                    <h3 className="email-context-subject">{reviewStatus.email_subject ?? selectedReviewItem?.subject ?? "(No Subject)"}</h3>
-                    {reviewStatus.email_body_preview && (
+                    <div className="email-context-subject-row">
+                      <h3 className="email-context-subject">{reviewStatus.email_subject ?? selectedReviewItem?.subject ?? "(No Subject)"}</h3>
+                      {reviewStatus.email_body_content && (
+                        <button
+                          type="button"
+                          className="body-expand-btn"
+                          onClick={() => setExpandedBody((v) => !v)}
+                          title={expandedBody ? "Collapse email" : "Expand full email"}
+                        >
+                          {expandedBody ? "▲" : "▼"}
+                        </button>
+                      )}
+                    </div>
+                    {!expandedBody && reviewStatus.email_body_preview && (
                       <p className="email-context-body">{reviewStatus.email_body_preview}</p>
+                    )}
+                    {expandedBody && reviewStatus.email_body_content && (
+                      <div className="email-body-full">
+                        {reviewStatus.email_body_content_type === "text/html"
+                          ? <iframe
+                              srcDoc={reviewStatus.email_body_content}
+                              sandbox="allow-same-origin"
+                              className="email-body-iframe"
+                              title="Email content"
+                            />
+                          : <pre className="email-body-text">{reviewStatus.email_body_content}</pre>
+                        }
+                      </div>
                     )}
                     {reviewStatus.decision_reason && (
                       <div className="decision-reason-badge">
@@ -581,41 +669,48 @@ function App() {
         {view === "tags" ? (
           <section className="panel">
             <div className="section-heading">
-              <h2>Tag Suggestions</h2>
-              <p>Human-in-the-loop category proposals grounded in backlog email samples.</p>
+              <h2>Category Suggestions</h2>
+              <p>New categories proposed automatically by the classifier when it encounters an unknown email type. Accept to add to your category list.</p>
             </div>
             <div className="suggestion-grid">
-              {suggestions.length === 0 ? (
-                <div className="empty-state">No tag suggestions. Click "Refresh Tags" to generate.</div>
+              {suggestions.filter(s => s.status !== "rejected").length === 0 ? (
+                <div className="empty-state">No category suggestions. Click "Refresh Categories" to generate.</div>
               ) : (
-                suggestions.map((s) => (
+                suggestions.filter(s => s.status !== "rejected").map((s) => (
                   <article key={s.suggestion_id} className={`tag-card ${s.status}`}>
                     <div className="tag-head">
                       <div>
                         <p className="status-badge">{s.status}</p>
                         <h3>{s.category_name}</h3>
+                        {s.supporting_email_ids.length > 0 && (
+                          <p style={{ fontSize: "0.75rem", color: "#94a3b8", margin: "2px 0 0" }}>
+                            {s.supporting_email_ids.length} email{s.supporting_email_ids.length !== 1 ? "s" : ""} suggest this category
+                          </p>
+                        )}
                       </div>
-                      <div className="action-stack">
-                        <button
-                          type="button"
-                          onClick={() => void handleSuggestionDecision(s.suggestion_id, "accept")}
-                          disabled={loading || s.status === "accepted"}
-                        >
-                          Accept
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => void handleSuggestionDecision(s.suggestion_id, "reject")}
-                          disabled={loading || s.status === "rejected"}
-                        >
-                          Reject
-                        </button>
-                      </div>
+                      {s.status !== "accepted" && (
+                        <div className="action-stack">
+                          <button
+                            type="button"
+                            onClick={() => void handleSuggestionDecision(s.suggestion_id, "accept")}
+                            disabled={loading}
+                          >
+                            Accept
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => void handleSuggestionDecision(s.suggestion_id, "reject")}
+                            disabled={loading}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <p className="tag-description">{s.category_description}</p>
                     <div className="keyword-cloud">
-                      {s.rationale_keywords.map((kw) => <span key={kw}>{kw}</span>)}
+                      {s.rationale_keywords.slice(0, 4).map((kw) => <span key={kw}>{kw}</span>)}
                     </div>
                     <div className="support-list">
                       <h4>Supporting Subjects</h4>
@@ -665,7 +760,7 @@ function App() {
               )}
             </div>
 
-            <div className="detail-column">
+            <div className="detail-column" ref={scheduleDetailRef}>
               {selectedCandidate ? (
                 <>
                   <div className="email-context-panel">
@@ -678,7 +773,35 @@ function App() {
                       </span>
                       <span className="email-context-date">{formatDate(selectedCandidate.email_received_at_utc)}</span>
                     </div>
-                    <h3 className="email-context-subject">{selectedCandidate.email_subject ?? "(No Subject)"}</h3>
+                    <div className="email-context-subject-row">
+                      <h3 className="email-context-subject">{selectedCandidate.email_subject ?? "(No Subject)"}</h3>
+                      {selectedCandidate.email_body_content && (
+                        <button
+                          type="button"
+                          className="body-expand-btn"
+                          onClick={() => setExpandedScheduleBody(v => !v)}
+                          title={expandedScheduleBody ? "Collapse email" : "Expand full email"}
+                        >
+                          {expandedScheduleBody ? "▲" : "▼"}
+                        </button>
+                      )}
+                    </div>
+                    {!expandedScheduleBody && selectedCandidate.email_body_preview && (
+                      <p className="email-context-body">{selectedCandidate.email_body_preview}</p>
+                    )}
+                    {expandedScheduleBody && selectedCandidate.email_body_content && (
+                      <div className="email-body-full">
+                        {selectedCandidate.email_body_content_type === "text/html"
+                          ? <iframe
+                              srcDoc={selectedCandidate.email_body_content}
+                              sandbox="allow-same-origin"
+                              className="email-body-iframe"
+                              title="Email body"
+                            />
+                          : <pre className="email-body-text">{selectedCandidate.email_body_content}</pre>
+                        }
+                      </div>
+                    )}
                   </div>
 
                   {selectedCandidate.classifier_summary ? (
@@ -771,63 +894,65 @@ function App() {
           <section className="panel">
             <div className="section-heading">
               <h2>Insights</h2>
-              <p>Classifier distribution, relationship graph summary, schedule signals, and preference learning.</p>
+              <p>Category distribution and relationship graph.</p>
             </div>
             <div className="insight-columns">
-              <article className="mini-panel">
+              <article className="mini-panel histogram-panel">
                 <h3>Category Distribution</h3>
-                {(dashboard?.category_distribution ?? []).map((item) => (
-                  <div key={item.label} className="bar-row">
-                    <span>{item.label}</span>
-                    <div className="bar-track">
-                      <div className="bar-fill" style={{ width: `${Math.min(100, item.value * 12)}%` }} />
+                {(dashboard?.category_distribution ?? []).length === 0 ? (
+                  <div className="empty-state">No categories yet.</div>
+                ) : (() => {
+                  const data = dashboard?.category_distribution ?? [];
+                  const max = Math.max(...data.map((d) => d.value), 1);
+                  const BAR_MAX_PX = 320;
+                  const palette = [
+                    "#0e7c66","#d4a24b","#4a9eca","#b24731",
+                    "#7b5ea7","#3a8c5c","#e07b39","#5b8dd9",
+                  ];
+                  return (
+                    <div className="histogram-container">
+                      <div className="histogram-chart">
+                        <div className="histogram-bars">
+                          {data.map((item, i) => (
+                            <div key={item.label} className="histogram-col">
+                              <div className="histogram-bar-wrap" style={{ height: `${BAR_MAX_PX}px` }}>
+                                <div
+                                  className="histogram-bar"
+                                  style={{
+                                    height: `${Math.max(4, Math.round((item.value / max) * BAR_MAX_PX))}px`,
+                                    background: palette[i % palette.length],
+                                  }}
+                                />
+                              </div>
+                              <div className="histogram-x-dot">
+                                <span className="histogram-dot" style={{ background: palette[i % palette.length] }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="histogram-baseline" />
+                      </div>
+                      <div className="histogram-legend">
+                        {data.map((item, i) => (
+                          <div key={item.label} className="histogram-legend-row">
+                            <span className="histogram-dot" style={{ background: palette[i % palette.length] }} />
+                            <span className="histogram-legend-name">{item.label}</span>
+                            <strong className="histogram-legend-count">{item.value}</strong>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <strong>{item.value}</strong>
-                  </div>
-                ))}
+                  );
+                })()}
               </article>
               <article className="mini-panel graph-panel">
                 <h3>Relationship Graph</h3>
                 <RelationshipGraph
-                  relationships={dashboard?.top_relationships ?? []}
+                  persons={relationshipGraph?.persons ?? []}
                   userEmail={userStatus?.primary_email ?? activeUserId}
-                  width={640}
-                  height={420}
+                  width={700}
+                  height={480}
                 />
-              </article>
-            </div>
-            <div className="insight-columns">
-              <article className="mini-panel">
-                <h3>Schedule Overview</h3>
-                <div className="list-row">
-                  <span>Recent tentative events written</span>
-                  <strong>{dashboard?.schedule_overview.recent_written_count ?? 0}</strong>
-                </div>
-                <div className="list-row">
-                  <span>Current suggest-only candidates</span>
-                  <strong>{dashboard?.schedule_overview.current_suggest_only_count ?? 0}</strong>
-                </div>
-                <div className="list-row">
-                  <span>Proactive candidates</span>
-                  <strong>{dashboard?.schedule_overview.proactive_candidate_count ?? 0}</strong>
-                </div>
-              </article>
-              <article className="mini-panel">
-                <h3>Preference Learning</h3>
-                <div className="list-row">
-                  <span>Total feedback events</span>
-                  <strong>{dashboard?.feedback_overview.total_events ?? 0}</strong>
-                </div>
-                <div className="list-row">
-                  <span>Recent feedback events</span>
-                  <strong>{dashboard?.feedback_overview.recent_events ?? 0}</strong>
-                </div>
-                {Object.entries(dashboard?.feedback_overview.signal_counts ?? {}).map(([sig, cnt]) => (
-                  <div key={sig} className="list-row">
-                    <span>{sig}</span>
-                    <strong>{cnt}</strong>
-                  </div>
-                ))}
               </article>
             </div>
           </section>
